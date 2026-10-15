@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>PreCutter</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>PreCutter</h1>
+    <span>v0.4 — düzenleme alanı</span>
+  </div>
+  <div class="header-right">
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button id="langTr" class="lang-btn active" type="button">TR</button>
+      <button id="langEn" class="lang-btn" type="button">EN</button>
+    </div>
+    <div class="local-badge mono" data-i18n="localBadge">yerel analiz · bulut yok</div>
+  </div>
+</header>
+
+<div class="shell">
+  <nav>
+    <div class="nav-item active" title="Proje">▤</div>
+    <div class="nav-item" title="Klasör">▦</div>
+    <div class="nav-item" title="Dışa aktarılanlar">▥</div>
+    <div class="nav-item" title="Ayarlar">⚙</div>
+  </nav>
+
+  <main>
+    <div class="center">
+      <section class="card" id="uploadCard">
+        <label class="drop" id="drop">
+          <input type="file" id="fileInput" accept=".mp4,.mkv,.mov" hidden />
+          <span class="drop-title" data-i18n="dropTitle">Videoyu buraya bırak veya gözatmak için tıkla</span>
+          <span class="drop-hint" id="dropHint">.mp4 · .mkv · .mov</span>
+        </label>
+
+        <div class="upload-progress" id="uploadProgress" hidden>
+          <div class="upload-progress-top">
+            <span id="uploadPct" class="mono">0%</span>
+            <span id="uploadSpeed" class="mono"></span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="uploadFill"></div></div>
+        </div>
+
+        <div class="file-chip" id="fileChip" hidden>
+          <div class="file-chip-info">
+            <strong id="fileName">-</strong>
+            <span class="mono" id="fileMeta">-</span>
+          </div>
+          <button class="chip-remove" id="fileRemove" type="button" aria-label="×">×</button>
+        </div>
+      </section>
+
+      <div class="preview" id="previewBox">
+        <video id="previewVideo" controls hidden></video>
+        <span id="previewPlaceholder" data-i18n="previewEmpty">önizleme</span>
+        <span class="preview-tag mono" id="previewTag" hidden></span>
+      </div>
+
+      <div class="timeline-block">
+        <div class="timeline-head">
+          <h2 data-i18n="timelineTitle">Tespit edilen bölümler</h2>
+          <div class="timeline-stats">
+            <span><span data-i18n="statTotal">Toplam</span>: <b class="mono" id="statTotal">-</b></span>
+            <span><span data-i18n="statKept">Tutulan</span>: <b class="mono keep-text" id="statKept">-</b></span>
+            <span><span data-i18n="statCut">Kesilen</span>: <b class="mono" id="statCut">-</b></span>
+          </div>
+        </div>
+
+        <div class="timeline" id="timeline">
+          <div class="timeline-empty" id="timelineEmpty" data-i18n="timelineEmpty">Henüz analiz yok</div>
+        </div>
+        <div class="ruler mono" id="ruler" hidden></div>
+
+        <div class="legend">
+          <div class="legend-item"><span class="dot keep"></span><span data-i18n="legendKeep">Konuşma / önemli an</span></div>
+          <div class="legend-item"><span class="dot cut"></span><span data-i18n="legendCut">Sessizlik / boş kısım</span></div>
+        </div>
+
+        <div class="summary-line mono" id="summaryLine" hidden></div>
+        <div class="summary-line mono" id="outputMeta" hidden></div>
+        <div class="upload-progress" id="renderProgress" hidden>
+          <div class="upload-progress-top">
+            <span id="renderPct" class="mono">0%</span>
+            <span id="renderStage" class="mono"></span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="renderFill"></div></div>
+        </div>
+        <p class="render-status" id="renderStatus" hidden></p>
+        <a id="downloadLink" class="download" href="#" hidden data-i18n="download">İşlenmiş videoyu indir</a>
+      </div>
+
+      <p class="error" id="error" hidden></p>
+    </div>
+
+    <aside>
+      <h2 data-i18n="settingsTitle">Ayarlar</h2>
+      <div class="sub mono" id="settingsSub">-</div>
+
+      <div class="preset-row" id="presetRow">
+        <div class="preset-chip active" data-preset="game" data-i18n="presetGame">Oyun kaydı</div>
+        <div class="preset-chip" data-preset="interview" data-i18n="presetInterview">Röportaj</div>
+        <div class="preset-chip" data-preset="chat" data-i18n="presetChat">Sohbet</div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" data-tab="kesim" data-i18n="tabCut">Kesim</div>
+        <div class="tab" data-tab="ses" data-i18n="tabAudio">Ses</div>
+        <div class="tab" data-tab="disa" data-i18n="tabExport">Dışa Aktar</div>
+      </div>
+
+      <div class="tab-panel active" data-panel="kesim">
+        <div class="field">
+          <div class="field-label">
+            <span data-i18n="thresholdLabel">Sessizlik eşiği</span>
+            <span class="val" id="thresholdValue">-42 dB</span>
+          </div>
+          <input type="range" id="threshold" min="-60" max="-10" step="1" value="-42" />
+          <div class="field-help" data-i18n="thresholdHelp">Bu seviyenin altındaki sesler boşluk sayılır</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <span data-i18n="gapLabel">Minimum boşluk süresi</span>
+            <span class="val" id="minSilenceValue">1.2 sn</span>
+          </div>
+          <input type="range" id="minSilence" min="0.2" max="3" step="0.1" value="1.2" />
+          <div class="field-help" data-i18n="gapHelp">Bundan kısa boşluklar kesilmez</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <span data-i18n="padLabel">Pay bırak (kesimden önce/sonra)</span>
+            <span class="val" id="paddingValue">180 ms</span>
+          </div>
+          <input type="range" id="padding" min="0" max="0.5" step="0.05" value="0.18" />
+          <div class="field-help" data-i18n="padHelp">Ani kesilmeleri önlemek için</div>
+        </div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="label" data-i18n="fillerLabel">Dolgu kelimeleri temizle</div>
+            <div class="desc" data-i18n="fillerDesc">"ıı", "şey" gibi tekrarları tespit et</div>
+          </div>
+          <div class="switch" id="fillerSwitch" role="switch" aria-checked="false" tabindex="0"></div>
+        </div>
+        <div class="filler-info mono" id="fillerInfo" hidden></div>
+      </div>
+
+      <div class="tab-panel" data-panel="ses">
+        <div class="field">
+          <div class="field-label"><span data-i18n="audioSource">Ses kaynağı</span></div>
+          <select id="audioTrack" class="select"></select>
+          <div class="field-help" data-i18n="audioSourceHelp">Hangi ses izine göre kesileceğini seç (örn. mikrofon izi)</div>
+        </div>
+        <div class="field" id="channelField" hidden>
+          <div class="field-label"><span data-i18n="audioChannel">Kanal</span></div>
+          <select id="audioChannel" class="select">
+            <option value="mix" data-i18n="channelMix">Karışık</option>
+            <option value="0" data-i18n="channelLeft">Sol</option>
+            <option value="1" data-i18n="channelRight">Sağ</option>
+          </select>
+          <div class="field-help" data-i18n="audioChannelHelp">Stereo kayıtta mikrofon tek kanaldaysa onu seç</div>
+        </div>
+        <button class="btn-secondary" id="auditionBtn" disabled data-i18n="auditionBtn">Seçili izi dinle</button>
+        <div class="audition-status mono" id="auditionStatus" hidden></div>
+        <audio id="auditionAudio" controls hidden></audio>
+        <div class="field-help" id="noAudioHelp" data-i18n="noAudioHelp">Tek ses izi varsa seçici gizlenir, varsayılan iz kullanılır.</div>
+      </div>
+
+      <div class="tab-panel" data-panel="disa">
+        <div class="field">
+          <div class="field-label"><span data-i18n="formatLabel">Format</span></div>
+          <select id="formatSelect" class="select" disabled>
+            <option>MP4 (H.264)</option>
+          </select>
+        </div>
+        <button class="btn-secondary" id="jsonBtn" disabled data-i18n="jsonBtn">Kesim noktalarını JSON indir</button>
+      </div>
+
+      <button class="export-btn" id="renderBtn" disabled data-i18n="exportBtn">Videoyu kes ve dışa aktar</button>
+      <div class="export-note mono" id="exportNote">-</div>
+      <button class="btn-secondary preview-toggle" id="previewToggle" hidden></button>
+    </aside>
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
