@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# PreCutter workspace (uploads/outputs)
+workspace/uploads/*
+workspace/outputs/*
+!workspace/uploads/.gitkeep
+!workspace/outputs/.gitkeep
+
+# Test artifacts
+*.mp4
+*.mkv
+*.mov
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
