@@ -2,9 +2,13 @@
 import logging
 import os
 import shutil
+import socket
+import sys
 import threading
 import time
+import urllib.request
 import uuid
+import webbrowser
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -1530,10 +1534,86 @@ def media_error_handler(_request, exc: media.MediaError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
+def _port_free(port: int) -> bool:
+    """127.0.0.1:port su anda bos mu?
+
+    SO_REUSEADDR kullanmadan denemek onemli: Windows'ta SO_REUSEADDR dolu bir
+    portu da "musait" gosterebiliyor, o yuzden duz bind denemesi yapiyoruz.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _pick_port(preferred: int, tries: int = 20) -> int:
+    """Tercih edilen port doluysa sirasiyla sonrakileri dener."""
+    for port in range(preferred, preferred + max(1, tries)):
+        if _port_free(port):
+            return port
+    return preferred
+
+
+def _looks_like_precutter(port: int, timeout: float = 1.0) -> bool:
+    """Bu portta zaten bir PreCutter sunucusu mu var?"""
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/", timeout=timeout) as resp:
+            if getattr(resp, "status", 200) != 200:
+                return False
+            head = resp.read(1024).decode("utf-8", "ignore").lower()
+            return "precutter" in head
+    except Exception:
+        return False
+
+
+def _open_browser_when_ready(url: str, timeout: float = 25.0) -> None:
+    """Sunucu cevap verir vermez tarayiciyi acan arka plan iscisi."""
+
+    def worker() -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"{url}/", timeout=1):
+                    webbrowser.open(url)
+                    return
+            except Exception:
+                time.sleep(0.3)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main() -> None:
     import uvicorn
 
-    uvicorn.run("precutter.app:app", host="127.0.0.1", port=8000, reload=False)
+    host = os.environ.get("PRECUTTER_HOST", "127.0.0.1")
+    preferred = int(os.environ.get("PRECUTTER_PORT", "8000"))
+    open_browser = not (_env_flag("PRECUTTER_NO_BROWSER") or "--no-browser" in sys.argv)
+
+    # Zaten calisan bir PreCutter varsa ikinci sunucuyu acmayalim; sadece
+    # tarayiciyi o pencereye goturelim (kullanici cift tiklamis olabilir).
+    if not _port_free(preferred) and _looks_like_precutter(preferred):
+        url = f"http://127.0.0.1:{preferred}"
+        print(f"PreCutter already running: {url}")
+        if open_browser:
+            webbrowser.open(url)
+        return
+
+    port = _pick_port(preferred)
+    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}"
+    print(f"PreCutter -> {url}   (Ctrl+C to stop)")
+    if port != preferred:
+        print(f"  note: port {preferred} was busy, using {port}")
+    if open_browser:
+        _open_browser_when_ready(url)
+
+    uvicorn.run("precutter.app:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

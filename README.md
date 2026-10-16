@@ -27,7 +27,20 @@ pip install -r requirements.txt
 python -m precutter.app
 ```
 
-Then open http://127.0.0.1:8000 in your browser.
+The browser opens by itself; the app is served at http://127.0.0.1:8000.
+Pass `--no-browser` (or set `PRECUTTER_NO_BROWSER=1`) to skip that.
+
+### Windows: one-click launcher
+
+- Double-click **`start.bat`** - it picks your Python (project `.venv` first),
+  checks the requirements, starts the server and opens the browser. Press
+  `Ctrl+C` in the server window (or close it) to stop.
+- Double-click **`create-shortcut.bat`** once to put a **PreCutter** shortcut on
+  your Desktop.
+- Overrides: `PRECUTTER_PORT` (default `8000`; if it is busy the next free port
+  is used), `PRECUTTER_HOST` (default `127.0.0.1`), `PRECUTTER_NO_BROWSER=1`.
+  Starting it twice is safe - if PreCutter is already running, the browser is
+  simply pointed at the running instance.
 
 ## Usage
 
