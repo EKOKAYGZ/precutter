@@ -463,7 +463,12 @@ input[type="range"]::-moz-range-thumb {
   padding: 3px 8px; cursor: pointer; font-size: 11px; font-weight: 700;
 }
 .lane-btn.active { color: var(--accent); border-color: var(--accent); }
-.zoom-scroll { overflow-x: auto; overflow-y: hidden; background: var(--bg); }
+/* Scroll width comes from .zoom-track (süre * pps); the canvas stays pinned
+   to the viewport with a JS translateX, so scrollLeft maps to time 1:1. */
+.zoom-scroll {
+  position: relative; overflow-x: auto; overflow-y: hidden; background: var(--bg);
+}
+.zoom-track { width: 0; height: 1px; margin-bottom: -1px; }
 .zoom-cv { display: block; cursor: crosshair; }
 .lane-note { font-size: 12px; color: var(--muted); padding: 10px; }
 .preai {

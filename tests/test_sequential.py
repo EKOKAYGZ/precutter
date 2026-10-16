@@ -144,3 +144,32 @@ def test_import_rejects_bad_paths(monkeypatch, tmp_path):
     bad = tmp_path / "not.txt"
     bad.write_bytes(b"x")
     assert client.post("/import", json={"path": str(bad)}).status_code == 400
+
+
+def test_overlays_label_ai_cuts_and_expose_speech(monkeypatch, tmp_path):
+    """Overlays read the cached transcript even with fillers/subtitles off.
+
+    Without that, AI cuts stayed labeled "silence" and the player had no
+    music/speech intervals to explain what a timeline marker was.
+    """
+    from precutter import transcribe as transcribe_mod
+
+    _upload_dir(monkeypatch, tmp_path)
+    (tmp_path / "v.mp4").write_bytes(b"0" * 16)
+    monkeypatch.setattr(media, "get_fps", lambda path: 30.0)
+    cached = {
+        "language": "tr",
+        "words": [{"text": "gol", "start": 1.0, "end": 1.4,
+                   "prob": 0.95, "filler": False}],
+        "fillers": [],
+        "speech": [[0.5, 3.0]], "music": [[6.0, 9.0]], "silence": [],
+        "filler_ratio": 0.0, "duration": 10.0,
+    }
+    monkeypatch.setattr(transcribe_mod, "load_cache", lambda *a, **k: cached)
+    req = app_module.ProcessRequest(filename="v.mp4")  # fillers/subtitles off
+    out = app_module._analysis_overlays(
+        tmp_path / "v.mp4", req, [[0.0, 5.0]], 10.0, ai_cuts=[[5.0, 10.0]])
+    assert out["transcript"]["available"] is True
+    assert out["speech"] == [[0.5, 3.0]]
+    assert out["music"] == [[6.0, 9.0]]
+    assert {c["reason"] for c in out["cuts"]} == {"ai"}

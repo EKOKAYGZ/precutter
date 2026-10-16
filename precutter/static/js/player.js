@@ -40,6 +40,7 @@ const S = {
   keep: [], // [[s,e]]
   cuts: [], // [{start,end,reason}]
   music: [],
+  speech: [], // [[s,e]] konuşma aralıkları (etiketler doğru olsun diye)
   highlights: [],
   mode: "original",
   lanes: [], // {track,muted,solo,base,audio,ready,peaks,els...}
@@ -74,6 +75,15 @@ function fmtT(t) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/* Time span of the timeline: analysis duration, else the video's own.
+ * Everything scroll-related uses this so the lanes can be panned even
+ * before an analysis exists. */
+function span() {
+  if (S.duration > 0) return S.duration;
+  const d = S.video ? S.video.duration : 0;
+  return Number.isFinite(d) && d > 0 ? d : 0;
+}
+
 /* ---------- keep/cut math ---------- */
 function sortedKeep() {
   return [...S.keep].sort((a, b) => a[0] - b[0]);
@@ -86,7 +96,7 @@ function gaps() {
     if (s > cursor + 1e-9) out.push([cursor, s]);
     cursor = Math.max(cursor, e);
   }
-  if (S.duration - cursor > 1e-9) out.push([cursor, S.duration]);
+  if (span() - cursor > 1e-9) out.push([cursor, span()]);
   return out;
 }
 
@@ -107,32 +117,44 @@ function nextKeepStart(t) {
   return null;
 }
 
-/* Reason at time t for tooltips (overlay priority: filler > ai > highlight > music). */
+/* Reason at time t for tooltips.
+ * Cuts keep their own reason (filler/ai/silence). Kept ranges report what
+ * actually covers t — speech, music, or plain "kept" — and any highlight
+ * is appended instead of hiding the base reason. */
+function inSpans(list, t) {
+  for (const iv of list || []) {
+    const s = Array.isArray(iv) ? iv[0] : (iv.start != null ? iv.start : iv.s);
+    const e = Array.isArray(iv) ? iv[1] : (iv.end != null ? iv.end : iv.e);
+    if (s == null || e == null) continue;
+    if (t >= s && t < e) return true;
+  }
+  return false;
+}
+
 function segReason(t) {
   for (const c of S.cuts) {
     if (t >= c.start && t < c.end && (c.reason === "filler" || c.reason === "ai")) {
       return { kind: "cut", s: c.start, e: c.end, reason: c.reason };
     }
   }
-  for (const h of S.highlights) {
-    if (t >= h.start && t < h.end) {
-      return { kind: "keep", s: h.start, e: h.end, reason: `highlight ${h.score}` };
-    }
-  }
-  for (const m of S.music) {
-    const s = m[0] != null ? m[0] : m.s;
-    const e = m[1] != null ? m[1] : m.e;
-    if (t >= s && t < e) return { kind: "keep", s, e, reason: "music" };
-  }
+  const hl = S.highlights.find((h) => t >= h.start && t < h.end) || null;
   for (const [s, e] of sortedKeep()) {
-    if (t >= s && t < e) return { kind: "keep", s, e, reason: "speech" };
+    if (t >= s && t < e) {
+      const parts = [];
+      if (inSpans(S.speech, t)) parts.push("speech");
+      else if (inSpans(S.music, t)) parts.push("music");
+      else parts.push("kept");
+      if (hl) parts.push(`highlight ${hl.score}`);
+      return { kind: "keep", s, e, reason: parts.join(" + ") };
+    }
+    if (s > t) break;
   }
   let cursor = 0;
   for (const [s, e] of sortedKeep()) {
     if (t >= cursor && t < s) return { kind: "cut", s: cursor, e: s, reason: "silence" };
     cursor = Math.max(cursor, e);
   }
-  return { kind: "cut", s: cursor, e: S.duration, reason: "silence" };
+  return { kind: "cut", s: cursor, e: span(), reason: "silence" };
 }
 
 /* ---------- audio lanes ---------- */
@@ -289,8 +311,11 @@ function buildLanes(tracks, micTrack) {
     head.appendChild(solo);
     const scroll = document.createElement("div");
     scroll.className = "zoom-scroll";
+    const track = document.createElement("div");
+    track.className = "zoom-track"; // kaydırma genişliği: süre * pps
     const zoom = document.createElement("canvas");
     zoom.className = "zoom-cv";
+    scroll.appendChild(track);
     scroll.appendChild(zoom);
     wrap.appendChild(head);
     wrap.appendChild(scroll);
@@ -299,7 +324,7 @@ function buildLanes(tracks, micTrack) {
       track: tr.track, muted: false, solo: false,
       base: tr.track === S.micTrack ? MIC_BOOST : GAME_LEVEL,
       audio: null, ready: false, peaks: null,
-      scrollEl: scroll, zoomCv: zoom, statusEl: status,
+      scrollEl: scroll, zoomCv: zoom, trackEl: track, statusEl: status,
       muteBtn: mute, soloBtn: solo, scrollRaf: null,
     };
     mute.addEventListener("click", () => {
@@ -327,17 +352,17 @@ function buildLanes(tracks, micTrack) {
       }
     });
     zoom.addEventListener("click", (e) => {
-      if (!S.video || !S.duration) return;
+      if (!S.video || !span()) return;
       const r = zoom.getBoundingClientRect();
       const t = (scroll.scrollLeft + (e.clientX - r.left)) / pps();
-      S.video.currentTime = Math.min(Math.max(t, 0), S.duration);
+      S.video.currentTime = Math.min(Math.max(t, 0), span() || Infinity);
       syncAudios(true);
     });
     zoom.addEventListener("mousemove", (e) => {
-      if (!S.duration || !S.tip) return;
+      if (!span() || !S.tip) return;
       const r = zoom.getBoundingClientRect();
       const t = (scroll.scrollLeft + (e.clientX - r.left)) / pps();
-      const seg = segReason(Math.min(Math.max(t, 0), S.duration));
+      const seg = segReason(Math.min(Math.max(t, 0), span() || Infinity));
       S.tip.textContent = `${fmtTC(seg.s)} → ${fmtTC(seg.e)} · ${seg.reason}`;
       S.tip.hidden = false;
     });
@@ -406,6 +431,14 @@ function rulerStep() {
 function drawLane(lane) {
   const scroll = lane.scrollEl;
   const cssW = Math.max(scroll.clientWidth || 600, 50);
+  // Scroll'un çalışması için içerik süre*pps kadar geniş olmalı; canvas ise
+  // viewport'a sabitlenir. Yoksa scrollLeft her zaman 0 kalır ve zaman
+  // ekseni başta donup kalır (işaretler yanlış yerde görünür).
+  if (lane.trackEl) {
+    const tw = `${Math.max(0, Math.ceil(span() * pps()))}px`;
+    if (lane.trackEl.style.width !== tw) lane.trackEl.style.width = tw;
+  }
+  lane.zoomCv.style.transform = `translateX(${scroll.scrollLeft}px)`;
   const ctx = setupCanvas(lane.zoomCv, cssW, ZOOM_H);
   const p = pps();
   const t0 = scroll.scrollLeft / p;
@@ -437,15 +470,25 @@ function drawLane(lane) {
     if (e < t0 || s > t1) continue;
     ctx.fillRect(Math.max(0, (s - t0) * p), 0, (e - s) * p, 7);
   }
+  // Speech strip at the bottom: nerede konuştuğunu gösterir.
+  ctx.fillStyle = "rgba(229,231,235,0.8)";
+  for (const iv of S.speech) {
+    const s = Array.isArray(iv) ? iv[0] : iv.start;
+    const e = Array.isArray(iv) ? iv[1] : iv.end;
+    if (s == null || e == null || e < t0 || s > t1) continue;
+    ctx.fillRect(Math.max(0, (s - t0) * p), ZOOM_H - 4,
+                 Math.max(1, (e - s) * p), 4);
+  }
   // Waveform.
-  if (lane.peaks && lane.peaks.length && S.duration > 0) {
+  const dur = span();
+  if (lane.peaks && lane.peaks.length && dur > 0) {
     const n = lane.peaks.length;
     ctx.fillStyle = "rgba(79,184,166,0.9)";
     const mid = ZOOM_H / 2;
     const amp = ZOOM_H / 2 - 4;
     for (let x = 0; x < cssW; x++) {
       const t = t0 + x / p;
-      const v = lane.peaks[Math.min(n - 1, Math.max(0, Math.floor((t / S.duration) * n)))] || 0;
+      const v = lane.peaks[Math.min(n - 1, Math.max(0, Math.floor((t / dur) * n)))] || 0;
       const h = Math.max(1, v * amp);
       ctx.fillRect(x, mid - h, 1, h * 2);
     }
@@ -482,8 +525,9 @@ function drawOverviewAll() {
   const ctx = setupCanvas(ov, cssW, OV_H);
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, cssW, OV_H);
-  if (!S.duration) return;
-  const X = (t) => (t / S.duration) * cssW;
+  const dur = span();
+  if (!dur) return;
+  const X = (t) => (t / dur) * cssW;
   ctx.fillStyle = COLORS.keep;
   for (const [s, e] of sortedKeep()) {
     ctx.fillRect(X(s), 6, Math.max(1, X(e) - X(s)), OV_H - 12);
@@ -503,8 +547,8 @@ function drawOverviewAll() {
   const first = S.lanes[0];
   if (first) {
     const p = pps();
-    const vx = (first.scrollEl.scrollLeft / p / S.duration) * cssW;
-    const vw = (first.scrollEl.clientWidth / p / S.duration) * cssW;
+    const vx = (first.scrollEl.scrollLeft / p / dur) * cssW;
+    const vw = (first.scrollEl.clientWidth / p / dur) * cssW;
     ctx.strokeStyle = "#e5e7eb";
     ctx.lineWidth = 1.5;
     ctx.strokeRect(vx + 0.5, 1.5, Math.max(4, vw), OV_H - 3);
@@ -539,7 +583,7 @@ function wireOverviewAll() {
   const geom = (w) => {
     const first = S.lanes[0];
     const p = pps();
-    const totalPx = S.duration * p;
+    const totalPx = span() * p;
     const vw = first ? first.scrollEl.clientWidth : w;
     const sl = first ? first.scrollEl.scrollLeft : 0;
     return { first, totalPx, vw, sl };
@@ -551,19 +595,19 @@ function wireOverviewAll() {
       Math.max(px, 0), Math.max(0, totalPx - vw));
   };
   ov.addEventListener("mousedown", (e) => {
-    if (!S.duration || !S.lanes.length) return;
+    if (!span() || !S.lanes.length) return;
     const { x, w } = pos(e);
     const { sl, vw } = geom(w);
     const p = pps();
-    const vx = (sl / p / S.duration) * w;
-    const vwid = (vw / p / S.duration) * w;
-    const t = (x / w) * S.duration;
+    const vx = (sl / p / span()) * w;
+    const vwid = (vw / p / span()) * w;
+    const t = (x / w) * span();
     if (x >= vx && x <= vx + vwid) {
       drag = { mode: "view", off: x - vx };
     } else {
       drag = { mode: "seek" };
       if (S.video) {
-        S.video.currentTime = Math.min(Math.max(t, 0), S.duration);
+        S.video.currentTime = Math.min(Math.max(t, 0), span() || Infinity);
         syncAudios(true);
       }
       centerOn(t);
@@ -571,15 +615,15 @@ function wireOverviewAll() {
     e.preventDefault();
   });
   ov.addEventListener("mousemove", (e) => {
-    if (!drag || !S.duration || !S.lanes.length) return;
+    if (!drag || !span() || !S.lanes.length) return;
     const { x, w } = pos(e);
     const { totalPx, vw } = geom(w);
     if (drag.mode === "view") {
       const frac = (x - drag.off) / w;
       setScroll(frac * totalPx);
     } else if (S.video) {
-      const t = (x / w) * S.duration;
-      S.video.currentTime = Math.min(Math.max(t, 0), S.duration);
+      const t = (x / w) * span();
+      S.video.currentTime = Math.min(Math.max(t, 0), span() || Infinity);
       syncAudios(true);
     }
   });
@@ -590,7 +634,7 @@ function centerOn(t, onlyLane) {
   const lanes = onlyLane ? [onlyLane] : S.lanes;
   for (const lane of lanes) {
     const p = pps();
-    const totalPx = S.duration * p;
+    const totalPx = span() * p;
     const vw = lane.scrollEl.clientWidth;
     lane.scrollEl.scrollLeft = Math.min(
       Math.max(t * p - vw / 2, 0), Math.max(0, totalPx - vw));
@@ -606,11 +650,11 @@ function setZoomAll(idx, anchorT) {
   const ni = Math.max(0, Math.min(PPS_LEVELS.length - 1, idx));
   if (ni === S.zoomIdx) return;
   const t = anchorT != null ? anchorT
-    : (S.video ? S.video.currentTime : S.duration / 2);
+    : (S.video ? S.video.currentTime : span() / 2);
   S.zoomIdx = ni;
   const p = pps();
   for (const lane of S.lanes) {
-    const totalPx = S.duration * p;
+    const totalPx = span() * p;
     const vw = lane.scrollEl.clientWidth;
     lane.scrollEl.scrollLeft = Math.min(
       Math.max(t * p - vw / 2, 0), Math.max(0, totalPx - vw));
@@ -756,6 +800,7 @@ function loadAnalysis(data) {
   S.keep = (data.segments || []).map(([s, e]) => [s, e]);
   S.cuts = data.cuts || [];
   S.music = data.music || [];
+  S.speech = data.speech || [];
   S.highlights = data.highlights || [];
   S.filename = data.filename || S.filename;
   S.lastFrame = -1;
@@ -858,6 +903,7 @@ function resetPlayer() {
   S.keep = [];
   S.cuts = [];
   S.music = [];
+  S.speech = [];
   S.highlights = [];
   S.duration = 0;
   S.filename = null;

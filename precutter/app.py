@@ -521,7 +521,8 @@ def _run_analyze_job(job_id: str, path: Path, req_data: dict) -> None:
             status="done", done=1, total=1,
             result={"duration": round(duration, 3), "segments": keep,
                     "summary": summary, "cuts": overlays["cuts"],
-                    "music": overlays["music"], "fps": overlays["fps"],
+                    "music": overlays["music"], "speech": overlays["speech"],
+                    "fps": overlays["fps"],
                     "highlights": highlights, "scores": scores,
                     "content": content,
                     "transcript": overlays["transcript"]},
@@ -547,46 +548,51 @@ def _detect_highlights(path: Path, req: ProcessRequest, duration: float,
 def _analysis_overlays(path: Path, req: ProcessRequest,
                        keep: List[list], duration: float,
                        ai_cuts: Optional[List[list]] = None) -> dict:
-    """Editor coloring: cut regions by reason + music strip + source fps.
+    """Editor coloring: cut regions by reason + music/speech strips + fps.
 
-    Silence = complement of keep; filler/AI = their cut ranges; music and
-    subtitle availability come from the cached transcript.
+    Silence = complement of keep; filler/AI = their cut ranges. The cached
+    transcript is read whenever it exists (a local JSON, so it's free) —
+    otherwise the AI cuts would never be labeled and the music/speech
+    markers would only show up when fillers or subtitles were requested.
     """
     keep_t = [(float(s), float(e)) for s, e in keep]
     cuts = [{"start": s, "end": e, "reason": "silence"}
             for s, e in segments.complement(keep_t, duration)]
     music: List[list] = []
+    speech: List[list] = []
     transcript = {"available": False, "language": None, "filler_count": 0,
                   "filler_ratio": 0.0, "word_count": 0}
-    if req.remove_fillers or req.make_subtitles:
-        try:
-            from . import transcribe as transcribe_mod
+    try:
+        from . import transcribe as transcribe_mod
 
-            cached = transcribe_mod.load_cache(
-                path, _whisper_model(req), req.whisper_language, req.audio_track)
-            if cached is not None:
-                result = transcribe_mod._transcript_from_dict(cached)
-                if req.remove_fillers:
-                    cuts = _relabel_filler_cuts(
-                        cuts, transcribe_mod.filler_intervals(result.words))
-                if ai_cuts:
-                    cuts = _relabel_ai_cuts(cuts, ai_cuts)
-                music = [[round(s, 3), round(e, 3)]
-                         for s, e in (result.music or [])]
-                transcript = {
-                    "available": True,
-                    "language": result.language,
-                    "filler_count": len(result.fillers),
-                    "filler_ratio": round(float(result.filler_ratio or 0.0), 4),
-                    "word_count": len(result.words),
-                }
-        except media.MediaError:
-            pass
+        cached = transcribe_mod.load_cache(
+            path, _whisper_model(req), req.whisper_language, req.audio_track)
+        if cached is not None:
+            result = transcribe_mod._transcript_from_dict(cached)
+            if req.remove_fillers:
+                cuts = _relabel_filler_cuts(
+                    cuts, transcribe_mod.filler_intervals(result.words))
+            music = [[round(s, 3), round(e, 3)]
+                     for s, e in (result.music or [])]
+            speech = [[round(s, 3), round(e, 3)]
+                      for s, e in (result.speech or [])]
+            transcript = {
+                "available": True,
+                "language": result.language,
+                "filler_count": len(result.fillers),
+                "filler_ratio": round(float(result.filler_ratio or 0.0), 4),
+                "word_count": len(result.words),
+            }
+    except Exception:  # overlays asla analizi batırmaz
+        pass
+    if ai_cuts:
+        cuts = _relabel_ai_cuts(cuts, ai_cuts)
     try:
         fps = media.get_fps(path)
     except media.MediaError:
         fps = 0.0
-    return {"cuts": cuts, "music": music, "fps": round(fps, 3) if fps else 0.0,
+    return {"cuts": cuts, "music": music, "speech": speech,
+            "fps": round(fps, 3) if fps else 0.0,
             "transcript": transcript}
 
 
