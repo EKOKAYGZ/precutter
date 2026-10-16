@@ -154,23 +154,3 @@ def test_chat_endpoint(monkeypatch, tmp_path):
     assert "gol" in resp.json()["reply"]
     assert client.post("/chat", json={
         "filename": "v.mp4", "message": "  "}).status_code == 400
-
-
-def test_frames_fallback_without_vision(monkeypatch, tmp_path):
-    from precutter import frames as frames_mod
-
-    monkeypatch.setattr(score_mod, "installed_models", lambda host=None: None)
-    out = frames_mod.classify_content(tmp_path / "v.mp4", 60.0, "fp123")
-    assert out["label"] == "general video"
-    assert out["model"] is None
-
-
-def test_pick_vision_model_order():
-    from precutter import frames as frames_mod
-
-    orig = score_mod.installed_models
-    score_mod.installed_models = lambda host=None: ["gemma3:4b", "qwen3:1.7b"]
-    try:
-        assert frames_mod.pick_vision_model("http://x") == "gemma3:4b"
-    finally:
-        score_mod.installed_models = orig

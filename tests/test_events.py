@@ -127,9 +127,6 @@ def test_analyze_ai_cut_falls_back_without_ollama(monkeypatch, tmp_path):
         "silence": [], "filler_ratio": 0.0, "duration": 10.0}
     monkeypatch.setattr(transcribe_mod, "load_cache", lambda *a, **k: cached)
     monkeypatch.setattr(score_mod, "installed_models", lambda host=None: None)
-    monkeypatch.setattr(
-        __import__("precutter.frames", fromlist=["x"]), "classify_content",
-        lambda *a, **k: {"label": "general video", "notes": "", "model": None})
     req = app_module.ProcessRequest(filename="v.mp4", ai_cut=True)
     _, keep, summary = app_module._analyze_file(target, req)
     assert keep == [[0.0, 10.0]]  # score 70, nothing below threshold

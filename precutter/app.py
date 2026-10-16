@@ -152,6 +152,7 @@ def _analyze_file(path: Path, req: ProcessRequest, progress=None) -> tuple[float
     ai_scores: list = []
     ai_cut_count = 0
     ai_source = "off"
+    ai_model_used = config.AI_MODEL
     content = {"label": "general video", "notes": "", "model": None}
     if req.manual_segments:
         # Kullanıcı zaman çizelgesinde elle düzenledi: tespit atlanır,
@@ -198,33 +199,41 @@ def _analyze_file(path: Path, req: ProcessRequest, progress=None) -> tuple[float
             music=getattr(transcript, "music", []) or [],
             on_stage=None)
         stage("events", 1, 1)
-        # v0.4 AI önem puanlama (transkript şart; kareler içeriği tanır).
+        # v0.4 vision + önem puanlama (transkript şart).
         if req.ai_cut and transcript is not None:
             from . import frames as frames_mod
             from . import score as score_mod
-            from . import transcribe as transcribe_mod
 
             threshold = req.ai_threshold or config.AI_THRESHOLD
-            try:
-                fp = transcribe_mod.file_fingerprint(path)
-            except OSError:
-                fp = ""
-            try:
-                content = frames_mod.classify_content(path, duration, fp or path.name)
-            except Exception:
-                content = {"label": "general video", "notes": "", "model": None}
-            label = content.get("label") or "general video"
-            if content.get("notes"):
-                label += f" ({content['notes']})"
 
             def ai_progress(done: int, total: int) -> None:
                 stage("ai", done, total)
 
+            vision = frames_mod.analyze_slices(
+                path, duration, transcript,
+                model=config.AI_MODEL, progress=ai_progress)
+            # Vision yoksa transcript-only: küçük metin modeli.
+            scoring_model = (config.AI_MODEL if vision["source"] == "vision"
+                             else frames_mod.FALLBACK_MODEL)
+            slices = vision["slices"]
+            if slices:
+                votes: dict = {}
+                for sl in slices:
+                    votes[sl["label"]] = votes.get(sl["label"], 0) + 1
+                content = {"label": max(votes, key=lambda k: votes[k]),
+                           "notes": f"{len(slices)} slices",
+                           "model": vision["model"]}
+            else:
+                content = {"label": "general video", "notes": "",
+                           "model": vision["model"]}
+            label = content.get("label") or "general video"
             scored = score_mod.score_segments(
                 transcript.words, keep, transcript.music or [], highlights,
-                transcript.language, label, progress=ai_progress)
+                transcript.language, label, progress=ai_progress,
+                model=scoring_model, vision=slices or None)
             ai_scores = scored["scores"]
             ai_source = scored["source"]
+            ai_model_used = scored["model"]
             ai_cuts = score_mod.cuts_below_threshold(ai_scores, threshold)
             if ai_cuts:
                 keep = segments.subtract_segments(keep, ai_cuts)
@@ -244,7 +253,7 @@ def _analyze_file(path: Path, req: ProcessRequest, progress=None) -> tuple[float
     summary["filler_count"] = filler_count
     summary["ai_cut_count"] = ai_cut_count
     summary["ai_source"] = ai_source
-    summary["ai_model"] = config.AI_MODEL
+    summary["ai_model"] = ai_model_used
     summary["content_label"] = content.get("label")
     # Alt çizgili anahtarlar iç taşıma içindir; job sonucu yazılmadan pop'lanır.
     summary["_highlights"] = highlights
@@ -1325,6 +1334,20 @@ def _chat_context(path: Path, req: ChatRequest, msg: str) -> str:
     result = transcribe_mod._transcript_from_dict(cached)
     lines.append(f"Language: {result.language}.")
     words = result.words
+    # Vision dilimleri (varsa): görsel bağlam transkriptle aynı zamandan.
+    try:
+        from . import frames as frames_mod
+
+        fp = frames_mod.transcript_fingerprint(words)
+        vhit = frames_mod.cached_slices(fp, config.AI_MODEL)
+        if vhit is not None:
+            for sl in vhit.get("slices", [])[:12]:
+                lines.append(
+                    f"[visual {sl['start']:.0f}-{sl['end']:.0f}s] "
+                    f"{sl.get('label')} ({sl.get('score')}): "
+                    f"{sl.get('reason')}")
+    except Exception:
+        pass
     # Soru kelimeleriyle örtüşen 60 sn pencereler, yoksa baştan.
     tokens = {w.lower() for w in msg.split() if len(w) > 3}
     buckets: Dict[int, List] = {}

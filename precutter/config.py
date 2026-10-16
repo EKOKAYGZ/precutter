@@ -26,11 +26,11 @@ FFPROBE_BIN = "ffprobe"
 
 WHISPER_MODEL = "base"
 
-# v0.4 AI (Ollama, local): GPU varsa Ollama kullanır, yoksa CPU. Model yoksa
-# indirme yapılmaz; hata mesajı `ollama pull` komutunu söyler.
+# v0.4 AI (Ollama, local): tek model hem vision hem puanlama.
+# GPU varsa Ollama kullanır, yoksa CPU.
 OLLAMA_HOST = "http://127.0.0.1:11434"
-AI_MODEL = "qwen3:1.7b"
-AI_VISION_MODELS = ("qwen3-vl:2b", "gemma3:4b")
+AI_MODEL = "qwen3-vl:4b"
+AI_VISION_MODELS = ("qwen3-vl:4b", "gemma3:4b")
 AI_THRESHOLD = 30
 
 # Kodlayıcı tercihi: "auto" (NVENC varsa onu kullan), "nvenc", "x264".

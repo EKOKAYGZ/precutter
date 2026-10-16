@@ -1,4 +1,4 @@
-"""v0.4 LLM importance scoring via Ollama (default qwen3:1.7b).
+"""v0.4 LLM importance scoring via Ollama (default qwen3-vl:4b).
 
 Design for small models (1.7B class, CPU-friendly):
 - Short, strict prompts: batched windows, JSON-only, temperature 0,
@@ -16,9 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from . import config
 from .media import MediaError
 
-AI_MODEL_DEFAULT = "qwen3:1.7b"
-# First installed model wins; never auto-downloads (user consent, big files).
-VISION_PREFERENCE = ("qwen3-vl:2b", "gemma3:4b", "llava:7b")
+AI_MODEL_DEFAULT = "qwen3-vl:4b"
 
 SEGMENTS_PER_CALL = 6
 MAX_WORDS_PER_SEGMENT = 200
@@ -157,8 +155,13 @@ def heuristic_score(seg: Dict[str, Any], words: List,
             score -= round(20 * min(1.0, lowc * 2))
             reasons.append("mumbled")
     if _overlaps(s, e, music):
-        score -= 15
-        reasons.append("over-music")
+        if inside:
+            # Ses "müzik" diyor ama kelime var: arka plan müzikli konuşma.
+            score += 5
+            reasons.append("speech+music")
+        else:
+            score -= 15
+            reasons.append("over-music")
     if _overlaps(s, e, highlights):
         score += 15
         reasons.append("highlight")
@@ -195,9 +198,31 @@ def score_batch(host: str, model: str, batch: List[Dict[str, Any]],
     return _parse_scores(reply, [w["id"] for w in batch])
 
 
-def _cache_key(fingerprint: str, model: str, lang: str) -> str:
-    raw = f"{fingerprint}|{model}|{lang}|v1".encode()
+def _cache_key(fingerprint: str, model: str, lang: str,
+                 vision_fp: str = "") -> str:
+    raw = f"{fingerprint}|{model}|{lang}|{vision_fp}|v2".encode()
     return "score_" + hashlib.sha256(raw).hexdigest()[:32] + ".json"
+
+
+def vision_for_segment(vision: Optional[List[Dict[str, Any]]],
+                       s: float, e: float) -> Optional[Tuple[int, str]]:
+    """Segmentle örtüşen slice'ların süre-ağırlıklı vizyon skoru."""
+    if not vision:
+        return None
+    total, acc = 0.0, 0.0
+    label_votes: Dict[str, float] = {}
+    for sl in vision:
+        a, b = float(sl["start"]), float(sl["end"])
+        ov = max(0.0, min(e, b) - max(s, a))
+        if ov > 0:
+            total += ov
+            acc += ov * int(sl.get("score", 70))
+            label_votes[str(sl.get("label", ""))] = \
+                label_votes.get(str(sl.get("label", "")), 0.0) + ov
+    if total <= 0:
+        return None
+    label = max(label_votes, key=lambda k: label_votes[k])
+    return round(acc / total), label
 
 
 def cache_path(key: str):
@@ -210,11 +235,14 @@ def score_segments(words: List, keep: List, music: List, highlights: List,
                    language: str, label: str,
                    progress: Optional[Callable[[int, int], None]] = None,
                    host: Optional[str] = None,
-                   model: Optional[str] = None) -> Dict[str, Any]:
+                   model: Optional[str] = None,
+                   vision: Optional[List[Dict[str, Any]]] = None
+                   ) -> Dict[str, Any]:
     """Score keep-segments. Returns {scores, source, model}.
 
     source is "llm" or "heuristic" (LLM down/bad reply -> fallback).
-    Results cached by transcript fingerprint.
+    Vision slices (when present) weigh 0.2: 0.5*llm + 0.2*vision + 0.3*heur.
+    Results cached by transcript fingerprint (+ vision hash).
     """
     from . import transcribe as transcribe_mod
 
@@ -228,7 +256,12 @@ def score_segments(words: List, keep: List, music: List, highlights: List,
     fp_src = "|".join(
         f"{getattr(w, 'text', '')}@{getattr(w, 'start', 0):.2f}" for w in words)
     fp = hashlib.sha256(fp_src.encode("utf-8", "replace")).hexdigest()[:32]
-    key = _cache_key(fp, model, language or "auto")
+    vision_fp = ""
+    if vision:
+        vision_fp = hashlib.sha256(json.dumps(
+            [(v.get("start"), v.get("end"), v.get("label"), v.get("score"))
+             for v in vision]).encode()).hexdigest()[:16]
+    key = _cache_key(fp, model, language or "auto", vision_fp)
     try:
         cached = json.loads(cache_path(key).read_text(encoding="utf-8"))
         if isinstance(cached, dict) and cached.get("fp") == fp:
@@ -262,10 +295,20 @@ def score_segments(words: List, keep: List, music: List, highlights: List,
     scores = []
     for w in segs:
         h, hreasons = heur[w["id"]]
+        vis = vision_for_segment(vision, w["start"], w["end"])
         if w["id"] in llm:
             ls, why = llm[w["id"]]
-            final = round(0.65 * ls + 0.35 * h)
-            reasons = ([why] if why else []) + hreasons[:2]
+            if vis is not None:
+                vs, vlabel = vis
+                final = round(0.5 * ls + 0.2 * vs + 0.3 * h)
+                reasons = ([why] if why else []) + [f"seen:{vlabel}"] + hreasons[:1]
+            else:
+                final = round(0.65 * ls + 0.35 * h)
+                reasons = ([why] if why else []) + hreasons[:2]
+        elif vis is not None:
+            vs, vlabel = vis
+            final = round(0.7 * h + 0.3 * vs)
+            reasons = [f"seen:{vlabel}"] + hreasons[:2]
         else:
             final, reasons = h, hreasons
         scores.append({"start": w["start"], "end": w["end"],

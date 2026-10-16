@@ -147,14 +147,19 @@ fails an analysis — on error it yields `[]`. PANNs/YAMNet labels
 
 ### v0.4 AI importance scoring (Ollama, optional)
 
-`qwen3:1.7b` (or any Ollama tag) scores keep-segments 0–100 for
-KEEP-worthiness; parts below `ai_threshold` (default 30) are cut. Design
-notes for small models: batched scoring (6 segments/call), strict
-JSON-only prompt with one few-shot example, `temperature: 0`,
-`think: false`, conservative fallback (unsure → 70+, keep). LLM +
-heuristic combine 65/35; any Ollama failure (down, missing model, bad
-JSON, timeout) falls back to heuristic-only scoring — the analysis still
-completes. Scores are cached by transcript fingerprint.
+One model does vision AND scoring (`qwen3-vl:4b`, settings-changeable,
+`think` off; GPU when Ollama has one, plain CPU otherwise). Slices: 1
+frame every 2 minutes (min 4, max 24), 320px, from each slice's middle.
+Each slice goes out as ONE call — frame + slice transcript + speech /
+silence / music ratios — and comes back as
+`{label, score, reason}` with labels `gameplay | talking-head |
+static-screen | menu-loading | cutscene`. Music rule: audio says music
+but words are present → speech with background music, no penalty.
+Segment scores blend 0.5·LLM + 0.2·vision + 0.3·heuristic; parts below
+`ai_threshold` (default 30) are cut. Any failure (model missing,
+timeout, bad JSON, Ollama down) falls back — transcript-only scoring
+with `qwen3:1.7b`, then heuristic — the analysis still completes. Slice
+and score caches key on file hash + model name.
 
 - `POST /analyze {"ai_cut": true, "ai_threshold": 30}` — needs a
   transcript, like fillers. Result adds `scores` (`start`/`end`/`score`/
@@ -163,9 +168,9 @@ completes. Scores are cached by transcript fingerprint.
 - `POST /chat {"filename", "message", "history?"}` — video Q&A over the
   transcript (keyword-retrieved windows). Needs `ollama serve` +
   `ollama pull qwen3:1.7b`.
-- Frames are optional: when a vision model (`qwen3-vl:2b`, `gemma3:4b`)
-  is already installed, 12 thumbnails classify the content once (cached);
-  otherwise everything is transcript-only. Nothing auto-downloads, ever.
+- Frames are optional context: slice labels feed the scoring prompt
+  and PRE.AI chat (`[visual 0-120s] gameplay (90): rush`). Nothing
+  auto-downloads, ever.
 - `GET /doctor` reports `ollama`, `ollama_models`, `ai_model`.
 - `PUT /settings` accepts `ollama_host`, `ai_model`, `ai_threshold`
   (10–70).

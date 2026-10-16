@@ -1,111 +1,233 @@
-"""Video frames: thumbnails for the vision model (content-aware cutting).
+"""Vision context: evenly-sampled frames + slice transcript, one model.
 
-Optional layer: when no vision model is installed in Ollama, everything
-falls back to transcript-only. Never downloads anything by itself.
+One Ollama model does vision AND scoring (default qwen3-vl:4b, think off).
+Sampling is dumb on purpose: 1 frame every 2 minutes (min 4, max 24),
+taken from the middle of each slice. Each slice goes out as ONE call
+carrying frame + slice transcript + audio ratios, and comes back as
+{label, score, reason}.
+
+Fallback chain (nothing ever breaks analysis):
+  vision model missing -> transcript-only scoring with qwen3:1.7b
+  Ollama down          -> heuristic scoring
+Cache key: file hash + model name.
 """
 import base64
+import hashlib
 import json
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from . import config
 from .media import MediaError
 
-FRAME_COUNT = 12
+EVERY_S = 120
+MIN_SLICES = 4
+MAX_SLICES = 24
 FRAME_WIDTH = 320
+FALLBACK_MODEL = "qwen3:1.7b"
+
+LABELS = ("gameplay", "talking-head", "static-screen", "menu-loading",
+          "cutscene")
+
+SLICE_SYSTEM = (
+    "You watch one video slice: a frame plus its transcript. "
+    "Reply with JSON only, no other text."
+)
+
+SLICE_USER = (
+    "Video: {label_hint}. Slice {start}-{end}s.\n"
+    "Transcript: \"{text}\"\n"
+    "Audio: speech {speech_pct}%, silence {silence_pct}%, music {music_pct}%.\n"
+    "Labels: gameplay | talking-head | static-screen | menu-loading | cutscene.\n"
+    "If audio says music but there are spoken words, it is speech with "
+    "background music, NOT a music scene.\n"
+    "Keep-worthy (highlights, funny/important speech) scores high; filler, "
+    "menus, loading screens score low. Unsure -> 70.\n"
+    'Reply exactly: {{"label":"...","score":N,"reason":"short"}}'
+)
 
 
-def extract_frames(path: Path, duration: float,
-                   count: int = FRAME_COUNT,
-                   width: int = FRAME_WIDTH) -> List[bytes]:
-    """Spread `count` JPEG thumbnails across the video. Returns raw bytes."""
-    if duration <= 0 or count <= 0:
-        return []
-    with tempfile.TemporaryDirectory(prefix="precutter-frames") as tmp:
-        out = str(Path(tmp) / "f%02d.jpg")
+def transcript_fingerprint(words: List) -> str:
+    src = "|".join(
+        f"{getattr(w, 'text', '')}@{getattr(w, 'start', 0):.2f}"
+        for w in words)
+    return hashlib.sha256(src.encode("utf-8", "replace")).hexdigest()[:32]
+
+
+def slice_bounds(duration: float, every_s: int = EVERY_S,
+                 min_n: int = MIN_SLICES,
+                 max_n: int = MAX_SLICES) -> List[List[float]]:
+    """Even slices covering [0, duration]. Count clamped min..max."""
+    n = max(min_n, min(max_n, max(1, round(duration / every_s))))
+    step = duration / n
+    return [[round(i * step, 3), round(min(duration, (i + 1) * step), 3)]
+            for i in range(n)]
+
+
+def extract_frame(path: Path, at: float, width: int = FRAME_WIDTH) -> bytes:
+    """One JPEG thumbnail at `at` seconds. Raises MediaError."""
+    with tempfile.TemporaryDirectory(prefix="precutter-frame") as tmp:
+        out = str(Path(tmp) / "f.jpg")
         cmd = [config.FFMPEG_BIN, "-hide_banner", "-nostats", "-v", "error",
-               "-i", str(path), "-vf",
-               f"fps={count}/{duration:.3f},scale={width}:-1",
+               "-ss", f"{max(0.0, at):.3f}", "-i", str(path),
+               "-frames:v", "1", "-vf", f"scale={width}:-1",
                "-q:v", "5", "-y", out]
         try:
             proc = subprocess.run(cmd, capture_output=True)
         except (FileNotFoundError, OSError) as exc:
             raise MediaError(f"ffmpeg not found: {exc}") from exc
         if proc.returncode != 0:
-            raise MediaError("Could not extract frames.")
-        files = sorted(Path(tmp).glob("f*.jpg"))
-        return [p.read_bytes() for p in files[:count]]
+            raise MediaError("Could not extract frame.")
+        try:
+            return Path(out).read_bytes()
+        except OSError as exc:
+            raise MediaError(f"Could not read frame: {exc}") from exc
 
 
-def pick_vision_model(host: str, preference=None) -> Optional[str]:
-    """First installed vision model, or None (no download, no error)."""
-    from . import score as score_mod
+def slice_transcript(words: List, start: float, end: float,
+                     max_words: int = 120) -> str:
+    toks = [getattr(w, "text", "") for w in words
+            if getattr(w, "start", 0) >= start - 0.05
+            and getattr(w, "end", 0) <= end + 0.05]
+    if len(toks) > max_words:
+        toks = toks[:max_words] + ["…"]
+    return " ".join(toks)
 
-    installed = score_mod.installed_models(host) or []
-    for want in (preference or config.AI_VISION_MODELS):
-        for name in installed:
-            if name == want or name.startswith(want + ":"):
-                return name
+
+def slice_ratios(start: float, end: float, speech: List, silence: List,
+                 music: List) -> Dict[str, int]:
+    """Share of the slice covered by each audio layer (0-100)."""
+    length = max(1e-6, end - start)
+
+    def cover(intervals: List) -> float:
+        total = 0.0
+        for iv in intervals or []:
+            if isinstance(iv, (list, tuple)):
+                a, b = float(iv[0]), float(iv[1])
+            else:
+                a = float(iv.get("start", iv.get("s", 0)))
+                b = float(iv.get("end", iv.get("e", 0)))
+            total += max(0.0, min(end, b) - max(start, a))
+        return round(100 * min(1.0, total / length))
+
+    return {"speech": cover(speech), "silence": cover(silence),
+            "music": cover(music)}
+
+
+def _cache_path(fp: str, model: str) -> Path:
+    from . import transcribe as transcribe_mod
+
+    raw = f"{fp}|{model}|slices-v1".encode()
+    return transcribe_mod.cache_dir() / (
+        "slices_" + hashlib.sha256(raw).hexdigest()[:32] + ".json")
+
+
+def cached_slices(fp: str, model: str) -> Optional[Dict]:
+    try:
+        data = json.loads(_cache_path(fp, model).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and data.get("fp") == fp:
+        return data
     return None
 
 
-def _frames_key(fingerprint: str, model: str) -> str:
-    import hashlib
+def _parse_slice(reply: str) -> Dict[str, Any]:
+    from . import score as score_mod
 
-    raw = f"{fingerprint}|{model}|frames-v1".encode()
-    return "frames_" + hashlib.sha256(raw).hexdigest()[:32] + ".json"
+    try:
+        data = json.loads(reply)
+    except (ValueError, TypeError) as exc:
+        raise score_mod.OllamaError(f"Bad JSON from model: {reply[:120]!r}") from exc
+    if not isinstance(data, dict):
+        raise score_mod.OllamaError("Slice reply is not an object.")
+    label = str(data.get("label", ""))
+    if label not in LABELS:
+        raise score_mod.OllamaError(f"Bad slice label: {label!r}.")
+    try:
+        score = max(0, min(100, int(data.get("score", 70))))
+    except (TypeError, ValueError) as exc:
+        raise score_mod.OllamaError("Bad slice score.") from exc
+    return {"label": label, "score": score,
+            "reason": str(data.get("reason", ""))[:80]}
 
 
-def classify_content(path: Path, duration: float, fingerprint: str,
-                     host: Optional[str] = None) -> Dict:
-    """What is this video? {label, notes, model} — cached, optional vision.
+def analyze_slices(path: Path, duration: float, transcript,
+                   label_hint: str = "general video",
+                   model: Optional[str] = None, host: Optional[str] = None,
+                   progress: Optional[Callable[[int, int], None]] = None
+                   ) -> Dict[str, Any]:
+    """Slice vision pass. Returns {slices, source, model}.
 
-    No vision model installed -> {"label": "general video", ...} fallback.
+    source "vision" on success, "transcript" when the vision model is
+    unavailable (caller scores text-only with the fallback model).
+    Never raises for Ollama problems; frame-decode errors yield [].
     """
     from . import score as score_mod
-    from . import transcribe as transcribe_mod
 
-    host = (host or config.OLLAMA_HOST or "http://127.0.0.1:11434").rstrip("/")
-    vision = pick_vision_model(host)
-    if vision is None:
-        return {"label": "general video", "notes": "",
-                "model": None}
-    key = _frames_key(fingerprint, vision)
-    cpath = transcribe_mod.cache_dir() / key
+    host = (host or config.OLLAMA_HOST
+            or "http://127.0.0.1:11434").rstrip("/")
+    model = model or config.AI_MODEL or "qwen3-vl:4b"
+    words = getattr(transcript, "words", []) or []
+    fp = transcript_fingerprint(words)
+    hit = cached_slices(fp, model)
+    if hit is not None:
+        if progress:
+            progress(1, 1)
+        return {"slices": hit["slices"], "source": "vision", "model": model}
     try:
-        cached = json.loads(cpath.read_text(encoding="utf-8"))
-        if isinstance(cached, dict) and cached.get("fp") == fingerprint:
-            return cached["result"]
-    except (OSError, ValueError, KeyError):
-        pass
+        score_mod._ensure_model(host, model)
+    except score_mod.OllamaError:
+        if progress:
+            progress(1, 1)
+        return {"slices": [], "source": "transcript",
+                "model": FALLBACK_MODEL}
+    bounds = slice_bounds(duration)
+    speech = getattr(transcript, "speech", []) or []
+    silence = getattr(transcript, "silence", []) or []
+    music = getattr(transcript, "music", []) or []
+    out: List[Dict[str, Any]] = []
     try:
-        frames = extract_frames(path, duration)
-        images = [base64.b64encode(f).decode() for f in frames[:8]]
         import httpx
-
-        r = httpx.post(
-            f"{host}/api/chat",
-            json={"model": vision, "think": False, "stream": False,
-                  "format": "json",
-                  "messages": [{
-                      "role": "user",
-                      "content": "What game or content is in these video frames? "
-                                 'Reply JSON only: {"label":"short name, e.g. Minecraft",'
-                                 ' "notes":"one line about style"}',
-                      "images": images}]},
-            timeout=120.0)
-        r.raise_for_status()
-        data = json.loads(r.json().get("message", {}).get("content", "{}"))
-        result = {"label": str(data.get("label", "general video"))[:60],
-                  "notes": str(data.get("notes", ""))[:200],
-                  "model": vision}
-    except Exception:
-        result = {"label": "general video", "notes": "", "model": vision}
+    except ImportError:
+        return {"slices": [], "source": "transcript",
+                "model": FALLBACK_MODEL}
+    for i, (start, end) in enumerate(bounds):
+        try:
+            frame = extract_frame(path, (start + end) / 2)
+            user = SLICE_USER.format(
+                label_hint=label_hint or "general video",
+                start=round(start), end=round(end),
+                text=slice_transcript(words, start, end)[:1500],
+                **{f"{k}_pct": v for k, v in
+                   slice_ratios(start, end, speech, silence, music).items()})
+            r = httpx.post(
+                f"{host}/api/chat",
+                json={"model": model, "think": False, "stream": False,
+                      "format": "json",
+                      "messages": [
+                          {"role": "system", "content": SLICE_SYSTEM},
+                          {"role": "user", "content": user,
+                           "images": [base64.b64encode(frame).decode()]}],
+                      "options": {"temperature": 0, "num_predict": 128}},
+                timeout=120.0)
+            r.raise_for_status()
+            parsed = _parse_slice(
+                r.json().get("message", {}).get("content", ""))
+            parsed.update(start=start, end=end)
+            out.append(parsed)
+        except (score_mod.OllamaError, MediaError):
+            continue  # bad slice: skip, keep the rest
+        except Exception:
+            continue
+        finally:
+            if progress:
+                progress(i + 1, len(bounds))
     try:
-        cpath.write_text(json.dumps({"fp": fingerprint, "result": result}),
-                         encoding="utf-8")
+        _cache_path(fp, model).write_text(
+            json.dumps({"fp": fp, "slices": out}), encoding="utf-8")
     except OSError:
         pass
-    return result
+    return {"slices": out, "source": "vision", "model": model}
