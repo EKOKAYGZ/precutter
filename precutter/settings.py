@@ -30,6 +30,7 @@ DEFAULTS: Dict[str, Any] = {
     "quality": config.QUALITY,
     "output_audio": config.OUTPUT_AUDIO,
     "preset": "game",
+    "preview_video": config.PREVIEW_VIDEO_PROXY,
     "max_upload_gb": round(config.MAX_UPLOAD_BYTES / 1024**3),
     "ollama_host": config.OLLAMA_HOST,
     "ai_model": config.AI_MODEL,
@@ -84,6 +85,17 @@ def _validate(patch: Dict[str, Any]) -> Dict[str, Any]:
         if v not in PRESETS:
             raise ValueError(f"preset must be one of {PRESETS}.")
         clean["preset"] = v
+    if "preview_video" in patch:
+        v = patch["preview_video"]
+        if isinstance(v, str):
+            low = v.strip().lower()
+            if low in ("true", "1", "yes", "on"):
+                v = True
+            elif low in ("false", "0", "no", "off", ""):
+                v = False
+        if not isinstance(v, bool):
+            raise ValueError("preview_video must be a boolean.")
+        clean["preview_video"] = v
     if "max_upload_gb" in patch:
         v = float(patch["max_upload_gb"])
         if not 1 <= v <= 20:
@@ -134,6 +146,7 @@ def apply_to_config(values: Dict[str, Any]) -> None:
     config.ENCODER_PREF = str(values["encoder"])
     config.QUALITY = str(values["quality"])
     config.OUTPUT_AUDIO = str(values["output_audio"])
+    config.PREVIEW_VIDEO_PROXY = bool(values["preview_video"])
     config.MAX_UPLOAD_BYTES = int(float(values["max_upload_gb"]) * 1024**3)
     config.OLLAMA_HOST = str(values["ollama_host"])
     config.AI_MODEL = str(values["ai_model"])

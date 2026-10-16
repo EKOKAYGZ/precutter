@@ -544,6 +544,9 @@ input[type="range"]::-moz-range-thumb {
 .set-row { display: flex; align-items: center; gap: 10px; }
 .set-row input[type="range"] { flex: 1; }
 .set-row b { font-size: 12px; color: var(--accent); min-width: 64px; text-align: right; }
+.set-grid label.set-check { flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap; }
+.set-grid label.set-check .field-help { flex-basis: 100%; margin-top: 0; }
+.set-check input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
 .storage-total { color: var(--muted-2); font-size: 11px; font-weight: 400; }
 .storage-item {
   display: flex; align-items: center; justify-content: space-between;

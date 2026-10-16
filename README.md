@@ -208,16 +208,26 @@ needs nothing but Ollama; everything else works with Ollama off.
 
 ### Preview proxies (no more stutter)
 
-Large sources are never played directly. After a file is added,
-`POST /proxy` builds once into `workspace/previews/<stem>/`:
-per-track audio (`trackN.ogg` opus 96k, AAC fallback) and a 720p H.264
-proxy video — background job with progress, atomic writes (`.part` +
-rename) under per-file locks, serialized in the single heavy slot.
-The player reads only proxies: drift < 0.04 s does nothing, 0.04–0.3 s
-nudges `playbackRate` 0.97/1.03, only > 0.3 s hard-seeks; hard sync on
-play/pause/seek/buffering, playback starts after all tracks `canplay`.
-`GET /proxy-audio`, `/proxy-video` and `/proxy/{name}` (status) are
+Large sources are never played directly for **audio**. After a file is
+added, `POST /proxy` builds once into `workspace/previews/<stem>/`:
+per-track audio (`trackN.ogg` opus 96k, AAC fallback) — a cheap job that
+finishes in seconds. The player reads those proxies: drift < 0.04 s does
+nothing, 0.04–0.3 s nudges `playbackRate` 0.97/1.03, only > 0.3 s
+hard-seeks; hard sync on play/pause/seek/buffering, playback starts after
+all tracks `canplay`. `GET /proxy-audio` and `/proxy/{name}` (status) are
 Range-capable (206). Proxy build failure falls back to direct files.
+
+The **video** proxy (a 720p H.264 re-encode of the whole source) is
+OFF by default (`PREVIEW_VIDEO_PROXY`). Re-encoding a multi-GB file
+takes minutes and competes with analysis for CPU — that was the
+"preparing preview 67%" stall, where two audio tracks were done and the
+third step (video) ground on with a mis-read progress counter. With it
+off, the `<video>` streams the original file directly and the proxy job
+ends as soon as audio is ready. Turn it on under **Settings → Motor →
+"Önizleme videosu (720p proxy)"** for huge/4K sources where a lighter
+decode helps playback: ffmpeg then runs at below-normal priority and
+reports real progress (ffmpeg's `out_time_ms` field is actually
+microseconds, so it is divided by `duration * 1e6`).
 
 ### One heavy job at a time
 

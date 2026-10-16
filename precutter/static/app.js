@@ -103,6 +103,7 @@ const els = {
   setAiModel: document.getElementById("setAiModel"),
   setAiThreshold: document.getElementById("setAiThreshold"),
   setAiThresholdVal: document.getElementById("setAiThresholdVal"),
+  setPreviewVideo: document.getElementById("setPreviewVideo"),
   storageList: document.getElementById("storageList"),
   storageTotal: document.getElementById("storageTotal"),
   clearCacheBtn: document.getElementById("clearCacheBtn"),
@@ -206,6 +207,8 @@ const STR = {
     ollamaHost: "Ollama adresi",
     aiModel: "AI modeli",
     aiThreshold: "AI kesim eşiği",
+    previewVideo: "Önizleme videosu (720p proxy)",
+    previewVideoHelp: "Kapalıyken önizleme doğrudan kaynaktan oynar — hızlı. Büyük dosyalarda açmak oynatmayı hafifletir ama videonu yeniden kodlar.",
     browseTitle: "Dosya seç",
     browseBtn: "Gözat",
     browseEmpty: "Burada video yok.",
@@ -328,6 +331,8 @@ const STR = {
     ollamaHost: "Ollama address",
     aiModel: "AI model",
     aiThreshold: "AI cut threshold",
+    previewVideo: "Preview video (720p proxy)",
+    previewVideoHelp: "Off = play straight from the source (fast). Enabling on large files lightens playback but re-encodes your video.",
     browseTitle: "Pick a file",
     browseBtn: "Browse",
     browseEmpty: "No videos here.",
@@ -1706,6 +1711,7 @@ async function openSettings() {
         syncAiThreshold();
       }
     }
+    if (els.setPreviewVideo) els.setPreviewVideo.checked = !!s.preview_video;
     syncSettingsLabels();
   } catch (err) {
     els.settingsNote.hidden = false;
@@ -1755,6 +1761,7 @@ async function saveSettings() {
     ollama_host: els.setOllama.value.trim(),
     ai_model: els.setAiModel.value.trim(),
     ai_threshold: Number(els.setAiThreshold.value),
+    preview_video: !!(els.setPreviewVideo && els.setPreviewVideo.checked),
   };
   try {
     const response = await fetch("/settings", {

@@ -971,13 +971,23 @@ def _run_proxy_job(job_id: str, path: Path) -> None:
             streams = media.audio_streams(path, include_loudness=False)
         except media.MediaError as exc:
             raise media.MediaError(f"No audio: {exc}") from exc
-        try:
-            proxy_duration = media.get_duration(path)
-        except media.MediaError:
-            proxy_duration = None
+        want_video = bool(getattr(config, "PREVIEW_VIDEO_PROXY", False))
+        proxy_duration: Optional[float] = None
+        if want_video:
+            try:
+                proxy_duration = media.get_duration(path)
+            except media.MediaError:
+                proxy_duration = None
         tracks = list(range(len(streams)))
-        total = len(tracks) + 1
+        total = len(tracks) + (1 if want_video else 0)
         outdir = proxy_mod.proxy_dir(path.stem)
+        if not want_video:
+            # Video proxy kapalı: önceki yarım kodlama artıklarını at.
+            for stale in outdir.glob("proxy.mp4.part"):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
         for i, track in enumerate(tracks):
             _set("proxy-audio", i, total)
             try:
@@ -985,16 +995,17 @@ def _run_proxy_job(job_id: str, path: Path) -> None:
             except media.MediaError:
                 pass
 
-        def _video_progress(frac: float) -> None:
-            _set("proxy-video", len(tracks) + frac, total)
+        if want_video:
+            def _video_progress(frac: float) -> None:
+                _set("proxy-video", len(tracks) + frac, total)
 
-        _set("proxy-video", len(tracks), total)
-        try:
-            proxy_mod.build_video_proxy(path, outdir,
-                                        duration=proxy_duration,
-                                        progress=_video_progress)
-        except media.MediaError:
-            pass
+            _set("proxy-video", len(tracks), total)
+            try:
+                proxy_mod.build_video_proxy(path, outdir,
+                                            duration=proxy_duration,
+                                            progress=_video_progress)
+            except media.MediaError:
+                pass
         result = proxy_mod.status(path.stem, tracks)
     except media.MediaError as exc:
         with _jobs_lock:

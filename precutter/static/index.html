@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>PreCutter</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="/static/style.css?v=20261016k" />
+  <link rel="stylesheet" href="/static/style.css?v=20261016l" />
 </head>
 <body>
 
@@ -366,6 +366,11 @@
       <label><span data-i18n="aiThreshold">AI kesim eşiği</span>
         <span class="set-row"><input type="range" id="setAiThreshold" min="10" max="70" step="5" /><b class="mono" id="setAiThresholdVal"></b></span>
       </label>
+      <label class="set-check">
+        <span data-i18n="previewVideo">Önizleme videosu (720p proxy)</span>
+        <input type="checkbox" id="setPreviewVideo" />
+        <span class="field-help" data-i18n="previewVideoHelp">Kapalıyken önizleme doğrudan kaynaktan oynar — hızlı. Büyük dosyalarda açmak oynatmayı hafifletir ama videonu yeniden kodlar.</span>
+      </label>
     </div>
 
     <h3 data-i18n="doctorTitle">Sistem durumu</h3>
@@ -386,7 +391,7 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=20261016k"></script>
-<script type="module" src="/static/js/player.js?v=20261016k"></script>
+<script src="/static/app.js?v=20261016l"></script>
+<script type="module" src="/static/js/player.js?v=20261016l"></script>
 </body>
 </html>

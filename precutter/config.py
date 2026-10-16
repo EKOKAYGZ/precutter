@@ -36,6 +36,12 @@ AI_THRESHOLD = 30
 # Kodlayıcı tercihi: "auto" (NVENC varsa onu kullan), "nvenc", "x264".
 ENCODER_PREF = "auto"
 
+# Önizleme videosu proxy'si: 720p H.264 kopya üretir. Büyük/4K dosyalarda
+# oynatmayı hafifletir ama önce tüm videoyu yeniden kodladığı için uzun
+# sürebilir. Varsayılan KAPALI: önizleme doğrudan kaynaktan oynar, ses
+# proxy'si (tek ucuz iş) takılmayı zaten çözer.
+PREVIEW_VIDEO_PROXY = False
+
 # Çıktı sesi: "mix" (mikrofon+oyun karışımı 1. iz + orijinaller),
 # "separate" (izler ayrı, mikrofon varsayılan), "miconly" (sadece mikrofon).
 OUTPUT_AUDIO = "mix"

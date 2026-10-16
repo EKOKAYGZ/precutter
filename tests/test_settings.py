@@ -28,6 +28,7 @@ def isolated_settings(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "OUTPUT_AUDIO", defaults["output_audio"])
     monkeypatch.setattr(
         config, "MAX_UPLOAD_BYTES", int(defaults["max_upload_gb"] * 1024**3))
+    monkeypatch.setattr(config, "PREVIEW_VIDEO_PROXY", defaults["preview_video"])
     monkeypatch.setattr(media, "_ENCODER_CACHE", {})
     return tmp_path
 
@@ -39,6 +40,22 @@ def test_settings_defaults(isolated_settings):
     assert data["threshold_db"] == config.THRESHOLD_DB
     assert data["whisper_model"] == "base"
     assert data["encoder"] == "auto"
+    assert data["preview_video"] is False  # önizleme varsayılan olarak beklemesin
+
+
+def test_settings_preview_video_toggle(isolated_settings):
+    ok = client.put("/settings", json={"preview_video": True})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["preview_video"] is True
+    assert config.PREVIEW_VIDEO_PROXY is True
+
+    ok = client.put("/settings", json={"preview_video": "false"})
+    assert ok.json()["preview_video"] is False
+    assert config.PREVIEW_VIDEO_PROXY is False
+
+    bad = client.put("/settings", json={"preview_video": "maybe"})
+    assert bad.status_code == 400
+    assert client.put("/settings", json={"preview_video": 3}).status_code == 400
 
 
 def test_settings_save_and_apply(isolated_settings):

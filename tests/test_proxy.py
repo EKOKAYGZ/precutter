@@ -58,40 +58,71 @@ def test_build_track_audio_atomic(two_track):
 
 @needs_ffmpeg
 def test_proxy_job_lifecycle_and_range(two_track):
-    resp = client.post("/proxy", json={"filename": "two.mp4"})
-    assert resp.status_code == 200, resp.text
-    job_id = resp.json()["job_id"]
-    deadline = time.time() + 180
-    while time.time() < deadline:
-        job = client.get(f"/jobs/{job_id}").json()
-        if job["status"] in ("done", "error"):
-            break
-        time.sleep(0.5)
-    assert job["status"] == "done", job
-    assert job["result"]["ready"] is True
-    assert set(job["result"]["audio"]) >= {"0", "1"}
+    # Bu test video proxy yolunu da kapsıyor: isteği açık tut.
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(app_module.config, "PREVIEW_VIDEO_PROXY", True)
+    try:
+        resp = client.post("/proxy", json={"filename": "two.mp4"})
+        assert resp.status_code == 200, resp.text
+        job_id = resp.json()["job_id"]
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            job = client.get(f"/jobs/{job_id}").json()
+            if job["status"] in ("done", "error"):
+                break
+            time.sleep(0.5)
+        assert job["status"] == "done", job
+        assert job["result"]["ready"] is True
+        assert set(job["result"]["audio"]) >= {"0", "1"}
+        assert job["result"]["video"] == "proxy.mp4"
 
-    st = client.get("/proxy/two.mp4").json()
-    assert st["ready"] is True
+        st = client.get("/proxy/two.mp4").json()
+        assert st["ready"] is True
 
-    full = client.get("/proxy-audio/two.mp4", params={"track": 0})
-    assert full.status_code == 200
-    assert len(full.content) > 1024
-    part = client.get("/proxy-audio/two.mp4", params={"track": 0},
-                      headers={"Range": "bytes=0-1023"})
-    assert part.status_code == 206, part.status_code
-    assert part.headers.get("content-range", "").startswith("bytes 0-1023/")
-    assert len(part.content) == 1024
-
-    vid = client.get("/proxy-video/two.mp4")
-    assert vid.status_code == 200
-    assert len(vid.content) > 1024
-    vid_part = client.get("/proxy-video/two.mp4",
+        full = client.get("/proxy-audio/two.mp4", params={"track": 0})
+        assert full.status_code == 200
+        assert len(full.content) > 1024
+        part = client.get("/proxy-audio/two.mp4", params={"track": 0},
                           headers={"Range": "bytes=0-1023"})
-    assert vid_part.status_code == 206
+        assert part.status_code == 206, part.status_code
+        assert part.headers.get("content-range", "").startswith("bytes 0-1023/")
+        assert len(part.content) == 1024
 
-    assert client.get("/proxy-audio/two.mp4",
-                      params={"track": 9}).status_code == 404
+        vid = client.get("/proxy-video/two.mp4")
+        assert vid.status_code == 200
+        assert len(vid.content) > 1024
+        vid_part = client.get("/proxy-video/two.mp4",
+                              headers={"Range": "bytes=0-1023"})
+        assert vid_part.status_code == 206
+
+        assert client.get("/proxy-audio/two.mp4",
+                          params={"track": 9}).status_code == 404
+    finally:
+        monkey.undo()
+
+
+@needs_ffmpeg
+def test_proxy_job_skips_video_when_disabled(two_track):
+    """preview_video kapalıyken iş sadece sesi yapar (analizi bekleterek
+    720p yeniden kodlamaz) ve video endpoint'i 404 döner."""
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(app_module.config, "PREVIEW_VIDEO_PROXY", False)
+    try:
+        resp = client.post("/proxy", json={"filename": "two.mp4"})
+        assert resp.status_code == 200, resp.text
+        job_id = resp.json()["job_id"]
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            job = client.get(f"/jobs/{job_id}").json()
+            if job["status"] in ("done", "error"):
+                break
+            time.sleep(0.5)
+        assert job["status"] == "done", job
+        assert set(job["result"]["audio"]) >= {"0", "1"}
+        assert job["result"]["video"] is None
+        assert client.get("/proxy-video/two.mp4").status_code == 404
+    finally:
+        monkey.undo()
 
 
 @needs_ffmpeg
