@@ -10,6 +10,7 @@ env/
 # PreCutter workspace (uploads/outputs)
 workspace/uploads/*
 workspace/outputs/*
+workspace/previews/*
 !workspace/uploads/.gitkeep
 !workspace/outputs/.gitkeep
 

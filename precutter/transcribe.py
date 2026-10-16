@@ -375,8 +375,68 @@ def build_music_layer(wav_samples: "list[float]",
     return subtract_intervals(candidates, confirmed_speech)
 
 
+# Whisper inference runs in chunks so progress can be reported on long
+# files (and a single huge array never has to sit in memory twice).
+TRANSCRIBE_CHUNK_SECONDS = 60.0
+TRANSCRIBE_CHUNK_OVERLAP = 2.0
+
+
+def _chunk_windows(total_samples: int, sample_rate: int,
+                   chunk_seconds: float = TRANSCRIBE_CHUNK_SECONDS,
+                   overlap_seconds: float = TRANSCRIBE_CHUNK_OVERLAP):
+    """Yield (chunk_start_sec, samples) windows with a small overlap.
+
+    The overlap avoids cutting words at boundaries; the caller drops
+    words/segments that fall inside the overlapped head of chunks after
+    the first one.
+    """
+    chunk_len = int(chunk_seconds * sample_rate)
+    overlap_len = int(overlap_seconds * sample_rate)
+    start = 0
+    while start < total_samples:
+        end = min(start + chunk_len + (overlap_len if start + chunk_len < total_samples else 0),
+                  total_samples)
+        yield start / sample_rate, slice(start, end)
+        start += chunk_len
+        if start >= total_samples:
+            break
+
+
 # --- faster-whisper ----------------------------------------------------------
 _whisper_cache: Dict[str, Any] = {}
+
+
+def whisper_device() -> str:
+    """faster-whisper'ın inference motoru için cihaz seç.
+
+    Asıl motor CTranslate2'dir; torch'a bakmak sadece yedek. ct2 CPU ile
+    derlendiyse torch CUDA görse bile GPU kullanılamaz — bu yüzden öncelik
+    ct2'nin kendi CUDA sayaçlıdır.
+    """
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() > 0:
+            return "cuda"
+    except Exception:
+        pass
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except ImportError:
+        pass
+    return "cpu"
+
+
+def gpu_name() -> Optional[str]:
+    """GPU adı (yoksa None). Ayarlar'daki Sistem durumu için."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_name(0)
+    except Exception:
+        pass
+    return None
 
 
 def _load_whisper(model_size: str = "base"):
@@ -388,13 +448,7 @@ def _load_whisper(model_size: str = "base"):
         ) from exc
     if model_size in _whisper_cache:
         return _whisper_cache[model_size]
-    device = "cuda"
-    try:
-        import torch
-        if not torch.cuda.is_available():
-            device = "cpu"
-    except ImportError:
-        device = "cpu"
+    device = whisper_device()
     try:
         model = WhisperModel(model_size, device=device,
                              compute_type="float16" if device == "cuda" else "int8")
@@ -413,10 +467,13 @@ def transcribe_file(
     use_silero: bool = True,
     detect_music: bool = True,
     audio_track: int = 0,
+    progress=None,
 ) -> Transcript:
     """Videoyu transcribe et; VAD + whisper + muzik + dolgu katmanlariyla.
 
     language=None -> otomatik tespit. audio_track secili ses izini kullanir.
+    progress, if given, is called as progress(done_chunks, total_chunks)
+    after each Whisper chunk (None on cache hit).
     """
     model_size = model_size or getattr(config, "WHISPER_MODEL", "base")
     if not source.exists():
@@ -437,28 +494,68 @@ def transcribe_file(
             vad_speech = energy_speech_fallback(wav_path)
 
         model = _load_whisper(model_size)
-        whisper_segments, info = model.transcribe(
-            str(wav_path), language=language, word_timestamps=True,
-            vad_filter=False, beam_size=5,
-        )
-        detected_lang = getattr(info, "language", None) or language or "auto"
-        seg_list = list(whisper_segments)
-        raw_seg_dicts = [
-            {"start": float(s.start), "end": float(s.end),
-             "no_speech_prob": float(getattr(s, "no_speech_prob", 0.0)),
-             "avg_logprob": float(getattr(s, "avg_logprob", 0.0))}
-            for s in seg_list
-        ]
+        # Nota: dosya yolu yerine numpy dizisi veriyoruz. faster-whisper
+        # dosya yolunda PyAV ile çözer (av>=14 ile bozulan metadata_errors
+        # argümanı yüzünden); diziyle bu katman tamamen atlanır. wav zaten
+        # 16 kHz mono olduğundan örnekleme de birebir uyar.
+        import numpy as _np
+
+        wav_samples = _np.asarray(read_wav_mono(wav_path), dtype=_np.float32)
+        windows = list(_chunk_windows(len(wav_samples), SAMPLE_RATE))
+        total_chunks = len(windows)
+        raw_seg_dicts = []
+        detected_langs = []
+        words: List[Word] = []
+        try:
+            for chunk_index, (chunk_start, sl) in enumerate(windows):
+                chunk = wav_samples[sl]
+                whisper_segments, info = model.transcribe(
+                    chunk, language=language, word_timestamps=True,
+                    vad_filter=False, beam_size=5,
+                )
+                chunk_lang = getattr(info, "language", None)
+                if chunk_lang:
+                    detected_langs.append(chunk_lang)
+                is_first = chunk_index == 0
+                for seg in whisper_segments:
+                    seg_start = float(seg.start) + chunk_start
+                    seg_end = float(seg.end) + chunk_start
+                    if not is_first and seg_start < chunk_start + TRANSCRIBE_CHUNK_OVERLAP:
+                        continue  # overlapped head: previous chunk has the full version
+                    raw_seg_dicts.append({
+                        "start": seg_start, "end": seg_end,
+                        "no_speech_prob": float(getattr(seg, "no_speech_prob", 0.0)),
+                        "avg_logprob": float(getattr(seg, "avg_logprob", 0.0)),
+                        "_seg": seg, "_offset": chunk_start,
+                        "_first": is_first,
+                    })
+                if progress is not None:
+                    progress(chunk_index + 1, total_chunks)
+        except Exception as exc:
+            raise MediaError(f"Transcription failed: {exc}") from exc
+        if detected_langs:
+            detected_lang = max(set(detected_langs), key=detected_langs.count)
+        else:
+            detected_lang = language or "auto"
 
         fset = filler_set(detected_lang)
-        words: List[Word] = []
-        for seg in seg_list:
+        for entry in raw_seg_dicts:
+            seg = entry["_seg"]
+            chunk_start = entry["_offset"]
             for w in (getattr(seg, "words", None) or []):
+                w_start = float(w.start) + chunk_start
+                if not entry["_first"] and w_start < chunk_start + TRANSCRIBE_CHUNK_OVERLAP:
+                    continue
                 norm = normalize_word(w.word)
                 is_filler = norm in fset
-                words.append(Word(text=w.word.strip(), start=float(w.start),
-                                  end=float(w.end), prob=float(getattr(w, "probability", 1.0)),
+                words.append(Word(text=w.word.strip(), start=w_start,
+                                  end=float(w.end) + chunk_start,
+                                  prob=float(getattr(w, "probability", 1.0)),
                                   filler=is_filler))
+        for entry in raw_seg_dicts:
+            del entry["_seg"]
+            del entry["_offset"]
+            del entry["_first"]
         fillers = [w for w in words if w.filler]
         filler_ratio = round(len(fillers) / max(1, len(words)), 4)
 
@@ -469,8 +566,7 @@ def transcribe_file(
 
         music: List[Interval] = []
         if detect_music:
-            samples = read_wav_mono(wav_path)
-            music = build_music_layer(samples, raw_seg_dicts, confirmed_speech=confirmed)
+            music = build_music_layer(wav_samples, raw_seg_dicts, confirmed_speech=confirmed)
             speech = subtract_intervals(speech, music)
 
         silence = silence_from_speech(merge_intervals(speech), duration)
@@ -503,3 +599,57 @@ def _transcript_from_dict(data: Dict[str, Any], cache_hit: bool = False) -> Tran
 def filler_intervals(words: List[Word], pad: float = 0.05) -> List[Interval]:
     """Kesilmek uzere dolgu kelime araliklari."""
     return merge_intervals([(max(0.0, w.start - pad), w.end + pad) for w in words if w.filler])
+
+
+def _srt_timestamp(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int(round((seconds - int(seconds)) * 1000))
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def build_srt(words: List[Word], keep: List[Interval]) -> str:
+    """Transcript words remapped onto the cut timeline, as SRT text.
+
+    Words inside cut regions are dropped; kept words shift left by the total
+    cut time before them. Cues break on gaps > 0.8 s or runs > 14 words.
+    """
+    kept = sorted(keep)
+    cues: List[List[Word]] = []
+    current: List[Word] = []
+    current_end = 0.0
+
+    def _new_time(t: float) -> Optional[float]:
+        elapsed = 0.0
+        for ks, ke in kept:
+            if t < ks:
+                return None
+            if t <= ke:
+                return elapsed + (t - ks)
+            elapsed += ke - ks
+        return None
+
+    for word in sorted(words, key=lambda w: w.start):
+        start = _new_time(word.start)
+        end = _new_time(word.end)
+        if start is None:
+            continue
+        if end is None:
+            end = start + max(word.end - word.start, 0.04)
+        if current and (start - current_end > 0.8 or len(current) >= 14):
+            cues.append(current)
+            current = []
+        current.append(Word(word.text, start, end, word.prob, word.filler))
+        current_end = end
+    if current:
+        cues.append(current)
+    blocks = []
+    for index, cue in enumerate(cues, start=1):
+        text = " ".join(w.text for w in cue)
+        blocks.append(
+            f"{index}\n{_srt_timestamp(cue[0].start)} --> "
+            f"{_srt_timestamp(cue[-1].end)}\n{text}"
+        )
+    return "\n\n".join(blocks) + ("\n" if blocks else "")

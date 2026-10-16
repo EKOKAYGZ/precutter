@@ -5,5 +5,8 @@ pytest>=8.0
 httpx>=0.27
 numpy>=1.26
 faster-whisper>=1.0
+# faster-whisper decodes via PyAV; av>=14 removed the metadata_errors kwarg
+# that faster-whisper 1.x passes to av.open(). Pin to a compatible range.
+av>=11,<14
 torch>=2.0
 torchaudio>=2.0

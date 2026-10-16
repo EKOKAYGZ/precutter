@@ -29,13 +29,16 @@ def test_render_job_lifecycle(monkeypatch, tmp_path):
 
     calls = []
 
-    def fake_render(path, segments, output_path, progress=None):
+    def fake_render(path, segments, output_path, progress=None,
+                    mic_track=0, output_audio=None):
         output_path.write_bytes(b"video")
         if progress is not None:
             progress(len(segments), len(segments))
         calls.append(segments)
 
     monkeypatch.setattr(app_module.render, "render", fake_render)
+    monkeypatch.setattr(
+        media, "audio_streams", lambda path, **kw: [{"track": 0}, {"track": 1}])
 
     resp = client.post("/render", json={"filename": "v.mp4"})
     assert resp.status_code == 200, resp.text
@@ -49,6 +52,7 @@ def test_render_job_lifecycle(monkeypatch, tmp_path):
     assert job["status"] == "done", job
     assert job["done"] == 2 and job["total"] == 2
     assert job["download_url"].startswith("/download/")
+    assert job["output_audio_tracks"] == 2
     assert calls and len(calls[0]) == 2
     (config.OUTPUTS_DIR / job["filename"]).unlink(missing_ok=True)
 
@@ -77,6 +81,7 @@ def test_job_not_found():
 
 def test_preview_audio_extract_and_cache(monkeypatch, tmp_path):
     _upload_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(config, "WORKSPACE_DIR", tmp_path)
     (tmp_path / "v.mp4").write_bytes(b"0" * 16)
     monkeypatch.setattr(
         media, "audio_streams",
@@ -99,9 +104,46 @@ def test_preview_audio_extract_and_cache(monkeypatch, tmp_path):
     resp2 = client.get("/preview-audio/v.mp4?track=1")
     assert resp2.status_code == 200
     assert len(runs) == 1
+    assert (tmp_path / "previews" / "v_t1_mono.m4a").exists()
 
-    for p in (config.WORKSPACE_DIR / "previews").glob("v_t1.m4a"):
-        p.unlink(missing_ok=True)
+
+def test_preview_audio_channel_solo(monkeypatch, tmp_path):
+    from precutter import app as appmod
+
+    _upload_dir(monkeypatch, tmp_path)
+    monkeypatch.setattr(config, "WORKSPACE_DIR", tmp_path)
+    (tmp_path / "v.mp4").write_bytes(b"0" * 16)
+    monkeypatch.setattr(
+        media, "audio_streams",
+        lambda path, **kw: [{"track": 0, "channels": 2}],
+    )
+
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        Path(cmd[-1]).write_bytes(b"fake-audio")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    resp = client.get("/preview-audio/v.mp4?track=0&channel=1")
+    assert resp.status_code == 200, resp.text
+    cmd = seen["cmd"]
+    assert "-ac" in cmd and "1" in cmd
+    assert any("pan=mono" in a for a in cmd)
+    assert (tmp_path / "previews" / "v_t0_ch1_mono.m4a").exists()
+
+
+def test_preview_audio_bad_channel(monkeypatch, tmp_path):
+    from precutter import app as appmod
+
+    _upload_dir(monkeypatch, tmp_path)
+    (tmp_path / "v.mp4").write_bytes(b"0" * 16)
+    monkeypatch.setattr(
+        media, "audio_streams",
+        lambda path, **kw: [{"track": 0, "channels": 1}],
+    )
+    assert client.get("/preview-audio/v.mp4?track=0&channel=1").status_code == 400
 
 
 def test_preview_audio_bad_track(monkeypatch, tmp_path):

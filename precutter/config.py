@@ -8,7 +8,10 @@ OUTPUTS_DIR = WORKSPACE_DIR / "outputs"
 
 THRESHOLD_DB = -35
 MIN_SILENCE = 0.6
-PADDING = 0.15
+PADDING_PRE = 0.2
+PADDING_POST = 0.25
+MIN_KEEP = 0.3
+MERGE_GAP = 0.3
 
 ALLOWED_EXTENSIONS = {".mp4", ".mkv", ".mov"}
 
@@ -22,6 +25,23 @@ FFMPEG_BIN = "ffmpeg"
 FFPROBE_BIN = "ffprobe"
 
 WHISPER_MODEL = "base"
+
+# v0.4 AI (Ollama, local): GPU varsa Ollama kullanır, yoksa CPU. Model yoksa
+# indirme yapılmaz; hata mesajı `ollama pull` komutunu söyler.
+OLLAMA_HOST = "http://127.0.0.1:11434"
+AI_MODEL = "qwen3:1.7b"
+AI_VISION_MODELS = ("qwen3-vl:2b", "gemma3:4b")
+AI_THRESHOLD = 30
+
+# Kodlayıcı tercihi: "auto" (NVENC varsa onu kullan), "nvenc", "x264".
+ENCODER_PREF = "auto"
+
+# Çıktı sesi: "mix" (mikrofon+oyun karışımı 1. iz + orijinaller),
+# "separate" (izler ayrı, mikrofon varsayılan), "miconly" (sadece mikrofon).
+OUTPUT_AUDIO = "mix"
+
+# Kalite: "match" (kaynak bit hızına uyar), "high", "small".
+QUALITY = "match"
 
 
 def ensure_dirs() -> None:

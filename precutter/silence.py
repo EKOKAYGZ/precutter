@@ -19,12 +19,14 @@ def detect_silence(
     duration: float | None = None,
     audio_track: int = 0,
     channel: int | None = None,
+    sample_seconds: float | None = None,
 ) -> List[Tuple[float, float]]:
     """Run silencedetect and return a list of (start, end) silence intervals.
 
     audio_track selects `-map 0:a:<track>` (multi-track recordings, e.g. OBS
     mic/game tracks). channel isolates one stereo channel first via
     `pan=mono|c0=c<channel>` (e.g. mic on left, game on right).
+    sample_seconds limits analysis to the first N seconds (fast activity scan).
     """
     if audio_track < 0:
         raise MediaError(f"Invalid audio track: {audio_track}.")
@@ -37,6 +39,10 @@ def detect_silence(
         config.FFMPEG_BIN,
         "-hide_banner",
         "-nostats",
+    ]
+    if sample_seconds is not None and sample_seconds > 0:
+        cmd += ["-t", f"{sample_seconds:.3f}"]
+    cmd += [
         "-i",
         str(path),
         "-map",

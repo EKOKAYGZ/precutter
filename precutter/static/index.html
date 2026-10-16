@@ -1,17 +1,18 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>PreCutter</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/static/style.css?v=20261016i" />
 </head>
 <body>
 
 <header>
   <div class="brand">
     <h1>PreCutter</h1>
-    <span>v0.4 — düzenleme alanı</span>
+    <span>v0.6 — izleme</span>
   </div>
   <div class="header-right">
     <div class="lang-switch" role="group" aria-label="Language">
@@ -27,11 +28,18 @@
     <div class="nav-item active" title="Proje">▤</div>
     <div class="nav-item" title="Klasör">▦</div>
     <div class="nav-item" title="Dışa aktarılanlar">▥</div>
-    <div class="nav-item" title="Ayarlar">⚙</div>
+    <div class="nav-item" id="navSettings" title="Ayarlar" role="button" tabindex="0">⚙</div>
   </nav>
 
   <main>
     <div class="center">
+      <section class="card file-topbar" id="fileTopbar" hidden>
+        <div class="file-chip-info">
+          <strong id="topFileName">-</strong>
+          <span class="mono" id="topFileMeta">-</span>
+        </div>
+        <button class="btn-secondary" id="changeFileBtn" type="button" data-i18n="changeFile">Dosya değiştir</button>
+      </section>
       <section class="card" id="uploadCard">
         <label class="drop" id="drop">
           <input type="file" id="fileInput" accept=".mp4,.mkv,.mov" hidden />
@@ -54,33 +62,68 @@
           </div>
           <button class="chip-remove" id="fileRemove" type="button" aria-label="×">×</button>
         </div>
+
+        <div class="import-row">
+          <button class="btn-secondary" id="importToggle" type="button" data-i18n="importToggle">Dosya yolundan ekle (kopyalamadan)</button>
+          <div class="import-form" id="importForm" hidden>
+            <input id="importPath" class="select mono" type="text" spellcheck="false" placeholder="C:\Videolar\kayit.mp4" />
+            <button class="btn-secondary" id="importBtn" type="button" data-i18n="importBtn">Ekle</button>
+            <button class="btn-secondary" id="browseBtn" type="button" data-i18n="browseBtn">Gözat</button>
+          </div>
+          <div class="field-help" data-i18n="importHelp">Aynı bilgisayardaki dosyayı karşıya yüklemeden bağlar — büyük dosyalarda anında açılır.</div>
+        </div>
       </section>
 
       <div class="preview" id="previewBox">
-        <video id="previewVideo" controls hidden></video>
+        <video id="previewVideo" muted playsinline preload="auto" hidden></video>
         <span id="previewPlaceholder" data-i18n="previewEmpty">önizleme</span>
         <span class="preview-tag mono" id="previewTag" hidden></span>
+        <div class="player-bar" id="playerBar" hidden>
+          <button class="pp-btn" id="ppPlay" type="button" aria-label="play/pause">▶</button>
+          <button class="pp-btn" id="ppFrameBack" type="button" aria-label="frame back">|◀</button>
+          <button class="pp-btn" id="ppFrameFwd" type="button" aria-label="frame forward">▶|</button>
+          <select id="ppSpeed" class="pp-select mono" aria-label="speed">
+            <option value="0.5">0.5×</option>
+            <option value="0.75">0.75×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.25">1.25×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+          </select>
+          <span id="ppTime" class="mono">00:00:00:00</span>
+          <input id="ppVol" type="range" min="0" max="1" step="0.05" value="1" aria-label="volume" />
+          <button class="pp-btn" id="ppFull" type="button" aria-label="fullscreen">⛶</button>
+          <div class="mode-switch" role="group" aria-label="Preview mode">
+            <button id="modeOriginal" class="mode-btn active" type="button" data-i18n="modeOriginal">Orijinal</button>
+            <button id="modeCut" class="mode-btn" type="button" data-i18n="modeCut">Kesim önizleme</button>
+            <button id="modeRendered" class="mode-btn" type="button" data-i18n="modeRendered" disabled>İşlenmiş</button>
+          </div>
+        </div>
       </div>
 
       <div class="timeline-block">
         <div class="timeline-head">
           <h2 data-i18n="timelineTitle">Tespit edilen bölümler</h2>
+          <span class="analysis-status idle" id="analysisStatus" data-i18n="statusIdle">Analiz bekleniyor</span>
           <div class="timeline-stats">
             <span><span data-i18n="statTotal">Toplam</span>: <b class="mono" id="statTotal">-</b></span>
             <span><span data-i18n="statKept">Tutulan</span>: <b class="mono keep-text" id="statKept">-</b></span>
             <span><span data-i18n="statCut">Kesilen</span>: <b class="mono" id="statCut">-</b></span>
           </div>
+          <div class="legend inline">
+            <div class="legend-item"><span class="dot keep"></span><span data-i18n="legendKeep">Konuşma / önemli an</span></div>
+            <div class="legend-item"><span class="dot cut"></span><span data-i18n="legendCut">Sessizlik / boş kısım</span></div>
+            <div class="legend-item"><span class="dot filler"></span><span data-i18n="legendFiller">Dolgu kelime kesimi</span></div>
+            <div class="legend-item"><span class="dot music"></span><span data-i18n="legendMusic">Müzik</span></div>
+            <div class="legend-item"><span class="dot highlight"></span><span data-i18n="legendHighlight">Öne çıkan an</span></div>
+            <div class="legend-item"><span class="dot ai"></span><span data-i18n="legendAI">AI kesimi</span></div>
+          </div>
         </div>
 
-        <div class="timeline" id="timeline">
-          <div class="timeline-empty" id="timelineEmpty" data-i18n="timelineEmpty">Henüz analiz yok</div>
-        </div>
-        <div class="ruler mono" id="ruler" hidden></div>
-
-        <div class="legend">
-          <div class="legend-item"><span class="dot keep"></span><span data-i18n="legendKeep">Konuşma / önemli an</span></div>
-          <div class="legend-item"><span class="dot cut"></span><span data-i18n="legendCut">Sessizlik / boş kısım</span></div>
-        </div>
+        <div class="lanes" id="lanes"></div>
+        <canvas id="ovAll" class="ov-all"></canvas>
+        <div class="tl-tip mono" id="tlTip" hidden></div>
+        <div class="proxy-note mono" id="proxyNote" hidden></div>
 
         <div class="summary-line mono" id="summaryLine" hidden></div>
         <div class="summary-line mono" id="outputMeta" hidden></div>
@@ -112,6 +155,7 @@
         <div class="tab active" data-tab="kesim" data-i18n="tabCut">Kesim</div>
         <div class="tab" data-tab="ses" data-i18n="tabAudio">Ses</div>
         <div class="tab" data-tab="disa" data-i18n="tabExport">Dışa Aktar</div>
+        <div class="tab" data-tab="ai" data-i18n="tabAI">AI</div>
       </div>
 
       <div class="tab-panel active" data-panel="kesim">
@@ -135,11 +179,20 @@
 
         <div class="field">
           <div class="field-label">
-            <span data-i18n="padLabel">Pay bırak (kesimden önce/sonra)</span>
-            <span class="val" id="paddingValue">180 ms</span>
+            <span data-i18n="padPreLabel">Pay bırak (kesimden önce)</span>
+            <span class="val" id="paddingPreValue">200 ms</span>
           </div>
-          <input type="range" id="padding" min="0" max="0.5" step="0.05" value="0.18" />
-          <div class="field-help" data-i18n="padHelp">Ani kesilmeleri önlemek için</div>
+          <input type="range" id="paddingPre" min="0" max="1" step="0.05" value="0.2" />
+          <div class="field-help" data-i18n="padPreHelp">Konuşma başlangıcı kırpılmasın diye</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">
+            <span data-i18n="padPostLabel">Pay bırak (kesimden sonra)</span>
+            <span class="val" id="paddingPostValue">250 ms</span>
+          </div>
+          <input type="range" id="paddingPost" min="0" max="1" step="0.05" value="0.25" />
+          <div class="field-help" data-i18n="padPostHelp">Ani kesilmeleri önlemek için</div>
         </div>
 
         <div class="toggle-row">
@@ -149,6 +202,29 @@
           </div>
           <div class="switch" id="fillerSwitch" role="switch" aria-checked="false" tabindex="0"></div>
         </div>
+        <div class="toggle-row">
+          <div>
+            <div class="label" data-i18n="subtitleLabel">Altyazı oluştur (SRT)</div>
+            <div class="desc" data-i18n="subtitleDesc">Konuşma metnini kesim planına işle</div>
+          </div>
+          <div class="switch" id="subtitleSwitch" role="switch" aria-checked="false" tabindex="0"></div>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="label" data-i18n="aiLabel">AI ile önemsiz yerleri kes</div>
+            <div class="desc" data-i18n="aiDesc">Transkripti puanlar, düşük skorluları atar (Ollama)</div>
+          </div>
+          <div class="switch" id="aiCutSwitch" role="switch" aria-checked="false" tabindex="0"></div>
+        </div>
+        <div class="field">
+          <div class="field-label">
+            <span data-i18n="aiThresholdLabel">AI kesim eşiği</span>
+            <span class="val" id="aiThresholdValue">30</span>
+          </div>
+          <input type="range" id="aiThreshold" min="10" max="70" step="5" value="30" />
+          <div class="field-help" data-i18n="aiThresholdHelp">Bu puanın altındaki bölümler kesilir</div>
+        </div>
+        <div class="filler-info mono" id="aiInfo" hidden></div>
         <div class="filler-info mono" id="fillerInfo" hidden></div>
       </div>
 
@@ -181,15 +257,135 @@
           </select>
         </div>
         <button class="btn-secondary" id="jsonBtn" disabled data-i18n="jsonBtn">Kesim noktalarını JSON indir</button>
+        <button class="btn-secondary" id="srtBtn" disabled data-i18n="srtBtn">Altyazıyı SRT indir</button>
       </div>
 
-      <button class="export-btn" id="renderBtn" disabled data-i18n="exportBtn">Videoyu kes ve dışa aktar</button>
-      <div class="export-note mono" id="exportNote">-</div>
-      <button class="btn-secondary preview-toggle" id="previewToggle" hidden></button>
+      <div class="tab-panel" data-panel="ai">
+        <section class="preai" id="preAi">
+          <h2>PRE.AI</h2>
+          <p class="preai-sub" data-i18n="preaiSub">Video asistanı — transkript ve puanlarla cevaplar</p>
+          <div class="field">
+            <div class="field-label"><span data-i18n="aiContentLabel">Tespit edilen içerik</span></div>
+            <div class="mono ai-content" id="aiContent">-</div>
+          </div>
+          <div class="chat-log" id="chatLog"></div>
+          <div class="chat-row">
+            <input id="chatInput" class="select mono" type="text" spellcheck="false" />
+            <button class="btn-secondary" id="chatSend" type="button" data-i18n="chatSend">Sor</button>
+          </div>
+          <div class="field-help" data-i18n="chatHelp">Video hakkında sor (transkript + puanlar kullanılır). Ollama gerekli.</div>
+        </section>
+      </div>
+
+      <div class="panel-actions">
+        <button class="btn-secondary" id="analyzeBtn" disabled data-i18n="analyzeBtn">Analiz Et</button>
+        <button class="export-btn" id="renderBtn" disabled data-i18n="exportBtn">Videoyu kes ve dışa aktar</button>
+        <div class="export-note mono" id="exportNote">-</div>
+      </div>
     </aside>
   </main>
 </div>
 
-<script src="/static/app.js"></script>
+<div class="modal-overlay" id="browseModal" hidden>
+  <div class="modal browser-modal">
+    <div class="modal-head">
+      <h2 data-i18n="browseTitle">Dosya seç</h2>
+      <button class="chip-remove" id="browseClose" type="button">×</button>
+    </div>
+    <div class="mono browse-path" id="browsePath">-</div>
+    <div id="browseList"></div>
+    <p class="modal-note mono" id="browseNote" hidden></p>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settingsModal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h2 data-i18n="settingsModalTitle">Uygulama ayarları</h2>
+      <button class="chip-remove" id="settingsClose" type="button">×</button>
+    </div>
+
+    <h3 data-i18n="settingsDefaults">Varsayılan kesim değerleri</h3>
+    <div class="set-grid">
+      <label><span data-i18n="thresholdLabel">Sessizlik eşiği</span>
+        <span class="set-row"><input type="range" id="setThreshold" min="-60" max="-10" step="1" /><b class="mono" id="setThresholdVal"></b></span>
+      </label>
+      <label><span data-i18n="gapLabel">Minimum boşluk süresi</span>
+        <span class="set-row"><input type="range" id="setMinSilence" min="0.2" max="3" step="0.1" /><b class="mono" id="setMinSilenceVal"></b></span>
+      </label>
+      <label><span data-i18n="padLabelShort">Pay bırak</span>
+        <span class="set-row"><input type="range" id="setPaddingPre" min="0" max="1" step="0.05" /><b class="mono" id="setPaddingPreVal"></b></span>
+      </label>
+      <label><span data-i18n="padPostShort">Pay bırak (sonra)</span>
+        <span class="set-row"><input type="range" id="setPaddingPost" min="0" max="1" step="0.05" /><b class="mono" id="setPaddingPostVal"></b></span>
+      </label>
+    </div>
+
+    <h3 data-i18n="settingsEngine">Motor</h3>
+    <div class="set-grid">
+      <label><span data-i18n="whisperModel">Whisper modeli</span>
+        <select id="setWhisper" class="select">
+          <option value="tiny">tiny</option>
+          <option value="base">base</option>
+          <option value="small">small</option>
+          <option value="medium">medium</option>
+          <option value="large-v3-turbo">large-v3-turbo</option>
+        </select>
+      </label>
+      <label><span data-i18n="encoderPref">Video kodlayıcı</span>
+        <select id="setEncoder" class="select">
+          <option value="auto" data-i18n="encoderAuto">Otomatik (NVENC varsa)</option>
+          <option value="nvenc">NVENC (donanım)</option>
+          <option value="x264">x264 (yazılım)</option>
+        </select>
+      </label>
+      <label><span data-i18n="qualityLabel">Kalite</span>
+        <select id="setQuality" class="select">
+          <option value="match" data-i18n="qualityMatch">Kaynakla eşleş (öneri)</option>
+          <option value="high" data-i18n="qualityHigh">Yüksek</option>
+          <option value="small" data-i18n="qualitySmall">Küçük dosya</option>
+        </select>
+      </label>
+      <label><span data-i18n="outputAudioLabel">Çıktı sesi</span>
+        <select id="setOutputAudio" class="select">
+          <option value="mix" data-i18n="outputAudioMix">Karışık: mikrofon + oyun (varsayılan)</option>
+          <option value="separate" data-i18n="outputAudioSeparate">Ayrı izler, mikrofon varsayılan</option>
+          <option value="miconly" data-i18n="outputAudioMicOnly">Sadece mikrofon</option>
+        </select>
+      </label>
+      <label><span data-i18n="maxUpload">En fazla yükleme (GB)</span>
+        <span class="set-row"><input type="range" id="setMaxUpload" min="1" max="20" step="1" /><b class="mono" id="setMaxUploadVal"></b></span>
+      </label>
+      <label><span data-i18n="ollamaHost">Ollama adresi</span>
+        <input id="setOllama" class="select mono" type="text" spellcheck="false" />
+      </label>
+      <label><span data-i18n="aiModel">AI modeli</span>
+        <input id="setAiModel" class="select mono" type="text" spellcheck="false" />
+      </label>
+      <label><span data-i18n="aiThreshold">AI kesim eşiği</span>
+        <span class="set-row"><input type="range" id="setAiThreshold" min="10" max="70" step="5" /><b class="mono" id="setAiThresholdVal"></b></span>
+      </label>
+    </div>
+
+    <h3 data-i18n="doctorTitle">Sistem durumu</h3>
+    <div class="mono doctor-box" id="doctorBox" data-i18n="doctorLoading">Yükleniyor…</div>
+
+    <h3><span data-i18n="storageTitle">Depolama</span> <span class="mono storage-total" id="storageTotal"></span></h3>
+    <div id="storageList"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="clearCacheBtn" type="button" data-i18n="clearCache">Önbelleği temizle</button>
+      <button class="btn-danger" id="clearAllBtn" type="button" data-i18n="clearAll">Tümünü sil</button>
+    </div>
+    <p class="modal-note mono" id="settingsNote" hidden></p>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" id="settingsCancel" type="button" data-i18n="cancelBtn">Vazgeç</button>
+      <button class="export-btn modal-save" id="settingsSave" type="button" data-i18n="saveBtn">Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js?v=20261016i"></script>
+<script type="module" src="/static/js/player.js?v=20261016i"></script>
 </body>
 </html>
