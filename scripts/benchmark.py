@@ -2,7 +2,7 @@
 
 Usage:
     python scripts/benchmark.py
-    python scripts/benchmark.py --models qwen3:1.7b gemma3:1b lfm2.5
+    python scripts/benchmark.py --models qwen3-vl:4b gemma3:4b qwen3:1.7b
     python scripts/benchmark.py --host http://127.0.0.1:11434
 
 Missing models are skipped (no auto-download). Needs Ollama running.
@@ -74,7 +74,7 @@ def bench_model(host: str, model: str, rounds: int = 2) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Benchmark v0.4 scoring models.")
     ap.add_argument("--models", nargs="+",
-                    default=["qwen3:1.7b", "gemma3:1b", "lfm2.5"])
+                    default=["qwen3-vl:4b", "gemma3:4b", "qwen3:1.7b"])
     ap.add_argument("--host", default="http://127.0.0.1:11434")
     ap.add_argument("--rounds", type=int, default=2)
     args = ap.parse_args()

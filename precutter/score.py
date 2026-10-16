@@ -74,7 +74,9 @@ def _ensure_model(host: str, model: str) -> None:
     if not any(n == model or n.startswith(model + ":") for n in names):
         raise OllamaError(
             f"Model '{model}' is not in Ollama. Run `ollama pull {model}` once, "
-            f"then retry. Installed: {', '.join(names[:8]) or 'none'}.")
+            f"or pick another model in Settings → Motor → AI modeli "
+            f"(default: {AI_MODEL_DEFAULT}). "
+            f"Installed: {', '.join(names[:8]) or 'none'}.")
 
 
 def _chat(host: str, model: str, system: str, user: str,

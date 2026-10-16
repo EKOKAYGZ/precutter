@@ -7,8 +7,8 @@ carrying frame + slice transcript + audio ratios, and comes back as
 {label, score, reason}.
 
 Fallback chain (nothing ever breaks analysis):
-  vision model missing -> transcript-only scoring with qwen3:1.7b
-  Ollama down          -> heuristic scoring
+  vision model unavailable -> same model scores transcript-only
+  Ollama down / model missing -> heuristic scoring
 Cache key: file hash + model name.
 """
 import base64
@@ -26,7 +26,6 @@ EVERY_S = 120
 MIN_SLICES = 4
 MAX_SLICES = 24
 FRAME_WIDTH = 320
-FALLBACK_MODEL = "qwen3:1.7b"
 
 LABELS = ("gameplay", "talking-head", "static-screen", "menu-loading",
           "cutscene")
@@ -162,7 +161,8 @@ def analyze_slices(path: Path, duration: float, transcript,
     """Slice vision pass. Returns {slices, source, model}.
 
     source "vision" on success, "transcript" when the vision model is
-    unavailable (caller scores text-only with the fallback model).
+    unavailable (caller then scores text-only with the SAME model — no
+    second model to install; qwen3-vl reads transcripts fine).
     Never raises for Ollama problems; frame-decode errors yield [].
     """
     from . import score as score_mod
@@ -182,8 +182,7 @@ def analyze_slices(path: Path, duration: float, transcript,
     except score_mod.OllamaError:
         if progress:
             progress(1, 1)
-        return {"slices": [], "source": "transcript",
-                "model": FALLBACK_MODEL}
+        return {"slices": [], "source": "transcript", "model": model}
     bounds = slice_bounds(duration)
     speech = getattr(transcript, "speech", []) or []
     silence = getattr(transcript, "silence", []) or []
@@ -192,8 +191,7 @@ def analyze_slices(path: Path, duration: float, transcript,
     try:
         import httpx
     except ImportError:
-        return {"slices": [], "source": "transcript",
-                "model": FALLBACK_MODEL}
+        return {"slices": [], "source": "transcript", "model": model}
     for i, (start, end) in enumerate(bounds):
         try:
             frame = extract_frame(path, (start + end) / 2)

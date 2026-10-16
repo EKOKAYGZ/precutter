@@ -157,9 +157,10 @@ static-screen | menu-loading | cutscene`. Music rule: audio says music
 but words are present → speech with background music, no penalty.
 Segment scores blend 0.5·LLM + 0.2·vision + 0.3·heuristic; parts below
 `ai_threshold` (default 30) are cut. Any failure (model missing,
-timeout, bad JSON, Ollama down) falls back — transcript-only scoring
-with `qwen3:1.7b`, then heuristic — the analysis still completes. Slice
-and score caches key on file hash + model name.
+timeout, bad JSON, Ollama down) falls back — the SAME model scores the
+transcript alone (vision off), then heuristic — the analysis still
+completes and never demands a second model be installed. Slice and
+score caches key on file hash + model name.
 
 - `POST /analyze {"ai_cut": true, "ai_threshold": 30}` — needs a
   transcript, like fillers. Result adds `scores` (`start`/`end`/`score`/
@@ -167,14 +168,14 @@ and score caches key on file hash + model name.
   fields `ai_cut_count`, `ai_source` (`llm`/`heuristic`/`off`), `ai_model`.
 - `POST /chat {"filename", "message", "history?"}` — video Q&A over the
   transcript (keyword-retrieved windows). Needs `ollama serve` +
-  `ollama pull qwen3:1.7b`.
+  `ollama pull qwen3-vl:4b`.
 - Frames are optional context: slice labels feed the scoring prompt
   and PRE.AI chat (`[visual 0-120s] gameplay (90): rush`). Nothing
   auto-downloads, ever.
 - `GET /doctor` reports `ollama`, `ollama_models`, `ai_model`.
 - `PUT /settings` accepts `ollama_host`, `ai_model`, `ai_threshold`
   (10–70).
-- `python scripts/benchmark.py [--models qwen3:1.7b gemma3:1b lfm2.5]`
+- `python scripts/benchmark.py [--models qwen3-vl:4b gemma3:4b qwen3:1.7b]`
   compares latency, JSON-valid rate and good-vs-bad spread on a fixed
   sample. Missing models are skipped.
 

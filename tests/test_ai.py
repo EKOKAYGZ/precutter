@@ -76,13 +76,16 @@ def test_score_segments_llm_then_cache(monkeypatch, no_score_cache):
     import httpx
     from precutter import transcribe as transcribe_mod
 
+    # Testin kendi modelini sabitle: workspace/settings.json'daki değer
+    # config'e sızabilir ve testi başka isimle koşmuş bulabilir.
+    monkeypatch.setattr(config, "AI_MODEL", "qwen3-vl:4b")
+    monkeypatch.setattr(score_mod, "installed_models",
+                        lambda host=None: ["qwen3-vl:4b"])
     calls = []
     reply = json.dumps({"scores": [
         {"id": 0, "score": 90, "why": "highlight"},
         {"id": 1, "score": 15, "why": "restart"}]})
     monkeypatch.setattr(httpx, "post", _fake_chat_factory(reply, calls))
-    monkeypatch.setattr(score_mod, "installed_models",
-                        lambda host=None: ["qwen3:1.7b"])
     words = [transcribe_mod.Word("gol", 1.0, 1.5, prob=0.95),
              transcribe_mod.Word("ıı", 20.0, 20.4, prob=0.9, filler=True)]
     keep = [[0.0, 5.0], [18.0, 25.0]]

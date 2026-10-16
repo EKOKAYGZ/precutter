@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>PreCutter</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="/static/style.css?v=20261016l" />
+  <link rel="stylesheet" href="/static/style.css?v=20261016m" />
 </head>
 <body>
 
@@ -361,7 +361,8 @@
         <input id="setOllama" class="select mono" type="text" spellcheck="false" />
       </label>
       <label><span data-i18n="aiModel">AI modeli</span>
-        <input id="setAiModel" class="select mono" type="text" spellcheck="false" />
+        <input id="setAiModel" class="select mono" type="text" spellcheck="false" placeholder="qwen3-vl:4b" />
+        <span class="field-help" data-i18n="aiModelHelp">Varsayılan qwen3-vl:4b — hem görüntü hem puanlama için aynı model. `ollama pull qwen3-vl:4b` ile kurulur; kurulmadan boş bırakıp Analiz'i açmak da çalışır (sezgisel).</span>
       </label>
       <label><span data-i18n="aiThreshold">AI kesim eşiği</span>
         <span class="set-row"><input type="range" id="setAiThreshold" min="10" max="70" step="5" /><b class="mono" id="setAiThresholdVal"></b></span>
@@ -391,7 +392,7 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=20261016l"></script>
-<script type="module" src="/static/js/player.js?v=20261016l"></script>
+<script src="/static/app.js?v=20261016m"></script>
+<script type="module" src="/static/js/player.js?v=20261016m"></script>
 </body>
 </html>

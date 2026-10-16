@@ -81,8 +81,9 @@ def test_analyze_slices_fallback_without_vision(monkeypatch, no_caches):
                             score_mod.OllamaError("down")))
     out = frames_mod.analyze_slices(
         no_caches / "v.mp4", 600.0, _tr(), model="qwen3-vl:4b")
+    # İkinci bir model istenmez: aynı model adıyla transcript-only devam.
     assert out == {"slices": [], "source": "transcript",
-                   "model": "qwen3:1.7b"}
+                   "model": "qwen3-vl:4b"}
 
 
 def test_analyze_slices_vision_path_and_cache(monkeypatch, no_caches):

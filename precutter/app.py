@@ -212,9 +212,10 @@ def _analyze_file(path: Path, req: ProcessRequest, progress=None) -> tuple[float
             vision = frames_mod.analyze_slices(
                 path, duration, transcript,
                 model=config.AI_MODEL, progress=ai_progress)
-            # Vision yoksa transcript-only: küçük metin modeli.
-            scoring_model = (config.AI_MODEL if vision["source"] == "vision"
-                             else frames_mod.FALLBACK_MODEL)
+            # Tek model ilkesi: vision yoksa AYNI model metinle puanlar
+            # (qwen3-vl metni de okur). O da yoksa score_segments sezgisel
+            # döner — analiz hiçbir zaman ikinci bir model kurulumu istemez.
+            scoring_model = vision.get("model") or config.AI_MODEL
             slices = vision["slices"]
             if slices:
                 votes: dict = {}
