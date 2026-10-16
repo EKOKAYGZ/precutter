@@ -176,7 +176,7 @@ const STR = {
     fillerLabel: "Dolgu kelimeleri temizle", fillerDesc: "\u201Cıı\u201D, \u201Cşey\u201D gibi tekrarları tespit et",
     subtitleLabel: "Altyazı oluştur (SRT)", subtitleDesc: "Konuşma metnini kesim planına işle",
     stageSilence: "sessizlik taranıyor", stageTranscribe: "transkript yazılıyor",
-    stageEvents: "ses olayları taranıyor",
+    stageEvents: "ses olayları taranıyor", stageProxy: "önizleme",
     subtitleReady: "Altyazı hazır ({n} kelime)",
     srtNoTranscript: "Altyazı yok — önce Altyazı seçeneğini açıp Analiz Et.",
     importToggle: "Dosya yolundan ekle (kopyalamadan)",
@@ -298,7 +298,7 @@ const STR = {
     fillerLabel: "Remove filler words", fillerDesc: "Detect repetitions like \u201Cuh\u201D, \u201Clike\u201D",
     subtitleLabel: "Generate subtitles (SRT)", subtitleDesc: "Transcribe speech for the cut timeline",
     stageSilence: "scanning silence", stageTranscribe: "transcribing",
-    stageEvents: "spotting sound events",
+    stageEvents: "spotting sound events", stageProxy: "preview",
     subtitleReady: "Subtitles ready ({n} words)",
     srtNoTranscript: "No transcript — enable Subtitles and Analyze first.",
     importToggle: "Add by file path (no copy)",
@@ -1140,6 +1140,17 @@ function stopRenderCountdown() {
 
 /* ---------- analyze (tek analiz, job tabanlı), sonra kullanıcı isterse render ----------
    (view-only: currentSegments her zaman son analizdir) ---------- */
+function stageLabel(job, stageKey) {
+  // "sırada" gizemi bitsin: slotu kimin tuttuğunu yaz.
+  if (job && job.stage === "queued" && job.blocked_by && job.blocked_by.kind) {
+    const kindKey = {
+      analyze: "stageAnalyze", transcribe: "stageTranscribe",
+      render: "stageRender", proxy: "stageProxy",
+    }[job.blocked_by.kind];
+    if (kindKey) return `${t("stageQueued")} · ${t(kindKey)}`;
+  }
+  return t(stageKey);
+}
 function currentSegments() {
   return lastSegments;
 }
@@ -1253,7 +1264,7 @@ async function pollAnalyzeJob(jobId, prevState, prevDetail) {
       transcribe: "stageTranscribe", analyze: "stageAnalyze",
       events: "stageEvents", ai: "stageAI",
     }[job.stage] || "stageAnalyze";
-    els.renderStage.textContent = t(stageKey);
+    els.renderStage.textContent = stageLabel(job, stageKey);
     if (job.stage === "transcribe" && job.total) {
       const pct = (job.done / job.total) * 100;
       els.renderFill.style.width = `${pct.toFixed(1)}%`;
@@ -1325,11 +1336,12 @@ async function pollJob(jobId) {
       break;
     }
     if (job.stage) {
-      els.renderStage.textContent = t({
+      const key = {
         render: "stageRender", analyze: "stageAnalyze", queued: "stageQueued",
         silence: "stageSilence", transcribe: "stageTranscribe",
         events: "stageEvents", ai: "stageAI",
-      }[job.stage] || "stageAnalyze");
+      }[job.stage] || "stageAnalyze";
+      els.renderStage.textContent = stageLabel(job, key);
     }
     if (job.total) {
       const pct = (job.done / job.total) * 100;

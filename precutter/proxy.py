@@ -53,7 +53,7 @@ def build_track_audio(src: Path, track: int, outdir: Path) -> str:
             cmd = [config.FFMPEG_BIN, "-hide_banner", "-nostats", "-v", "error",
                    "-y", "-i", str(src), "-map", f"0:a:{track}", "-vn",
                    "-c:a", codec, "-b:a", "96k", "-ac", "2",
-                   "-f", fmt, str(tmp)]
+                   "-threads", "2", "-f", fmt, str(tmp)]
             try:
                 proc = subprocess.run(cmd, capture_output=True, text=True)
             except (FileNotFoundError, OSError) as exc:
@@ -81,6 +81,7 @@ def build_video_proxy(src: Path, outdir: Path,
                "-y", "-i", str(src),
                "-vf", f"scale=-2:{height}", "-c:v", "libx264",
                "-preset", "veryfast", "-crf", "28", "-an",
+               "-threads", "4",
                "-movflags", "+faststart", "-f", "mp4", str(tmp)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True)

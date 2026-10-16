@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>PreCutter</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="/static/style.css?v=20261016i" />
+  <link rel="stylesheet" href="/static/style.css?v=20261016j" />
 </head>
 <body>
 
@@ -91,6 +91,7 @@
             <option value="2">2×</option>
           </select>
           <span id="ppTime" class="mono">00:00:00:00</span>
+          <input id="ppScrub" type="range" min="0" max="1000" step="1" value="0" aria-label="seek" />
           <input id="ppVol" type="range" min="0" max="1" step="0.05" value="1" aria-label="volume" />
           <button class="pp-btn" id="ppFull" type="button" aria-label="fullscreen">⛶</button>
           <div class="mode-switch" role="group" aria-label="Preview mode">
@@ -385,7 +386,7 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=20261016i"></script>
-<script type="module" src="/static/js/player.js?v=20261016i"></script>
+<script src="/static/app.js?v=20261016j"></script>
+<script type="module" src="/static/js/player.js?v=20261016j"></script>
 </body>
 </html>

@@ -79,6 +79,22 @@ def test_job_not_found():
     assert client.get("/jobs/nope").status_code == 404
 
 
+def test_queued_job_reports_blocker():
+    """Slotu tutan iş, bekleyenin /jobs çıktısında görünür."""
+    with app_module._heavy_slot("holder1", "render"):
+        with app_module._jobs_lock:
+            app_module._jobs["waiter1"] = {
+                "status": "working", "stage": "queued", "done": 0,
+                "total": None, "created": time.time()}
+        try:
+            data = client.get("/jobs/waiter1").json()
+            assert data["blocked_by"] == {"job_id": "holder1", "kind": "render"}
+        finally:
+            with app_module._jobs_lock:
+                app_module._jobs.pop("waiter1", None)
+    assert app_module._HEAVY_HOLDER is None
+
+
 def test_preview_audio_extract_and_cache(monkeypatch, tmp_path):
     _upload_dir(monkeypatch, tmp_path)
     monkeypatch.setattr(config, "WORKSPACE_DIR", tmp_path)

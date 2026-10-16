@@ -222,8 +222,12 @@ Range-capable (206). Proxy build failure falls back to direct files.
 ### One heavy job at a time
 
 Analysis (silence scan + optional Whisper), rendering (ffmpeg) and
-standalone transcription (Whisper) are all heavy; running them together
-starves CPU/RAM and can kill the server. So:
+standalone transcription (Whisper) share one heavy slot; running them
+together starves CPU/RAM and can kill the server. Waiting jobs report
+`stage: "queued"` — and since jobs name the slot holder, the UI shows
+*what* they wait for (`blocked_by: {job_id, kind}`), e.g. "sırada ·
+önizleme". Preview proxies run OUTSIDE the slot (thread-capped ffmpeg)
+so starting an analysis never waits on preview generation.
 
 - **Single heavy slot.** Only one render/transcribe computes at a time. The
   waiting job reports `stage: "queued"` until the slot frees, then continues

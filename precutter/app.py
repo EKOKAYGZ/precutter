@@ -5,7 +5,7 @@ import shutil
 import threading
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -500,7 +500,7 @@ def _run_analyze_job(job_id: str, path: Path, req_data: dict) -> None:
                 if job is not None:
                     job.update(status="working", stage=name, done=done, total=total)
 
-        with _HEAVY_SEM:
+        with _heavy_slot(job_id, "analyze"):
             duration, keep, summary = _analyze_file(path, req, progress=on_stage)
             ai_cuts = summary.pop("_ai_cuts", [])
             highlights = summary.pop("_highlights", [])
@@ -637,7 +637,7 @@ def _run_render_job(job_id: str, path: Path, req_data: dict) -> None:
     try:
         req = ProcessRequest(**req_data)
         # Ağır iş sırası: başka bir render/transkript bitene kadar bekle.
-        with _HEAVY_SEM:
+        with _heavy_slot(job_id, "render"):
             with _jobs_lock:
                 _jobs[job_id].update(stage="analyze", done=0, total=None)
             duration, keep, summary = _analyze_file(path, req)
@@ -681,7 +681,29 @@ _jobs_lock = threading.Lock()
 # Ağır iş disiplini: render (ffmpeg) ve transkript (whisper) aynı anda
 # koşarsa CPU/RAM yarışı sunucuyu öldürüyor (bkz. çift Whisper olayı).
 # Global semaphore ile günde 1 ağır iş işler; diğerleri "queued"da bekler.
+# Proxy (önizleme üretimi) slot DIŞINDA koşar — ffmpeg'i thread-cap'li
+# çalıştırır, analizi bekletmez.
 _HEAVY_SEM = threading.Semaphore(1)
+
+# Slotu tutan iş (tür + id): "queued" görünen iş kimin arkasında
+# beklediğini söyler, merak edilmez.
+_HEAVY_HOLDER: Optional[dict] = None
+
+
+@contextmanager
+def _heavy_slot(job_id: str, kind: str):
+    """Slotu al, holder'ı kaydet, bırakırken temizle."""
+    global _HEAVY_HOLDER
+    _HEAVY_SEM.acquire()
+    with _jobs_lock:
+        _HEAVY_HOLDER = {"job_id": job_id, "kind": kind}
+    try:
+        yield
+    finally:
+        with _jobs_lock:
+            if _HEAVY_HOLDER is not None and _HEAVY_HOLDER.get("job_id") == job_id:
+                _HEAVY_HOLDER = None
+        _HEAVY_SEM.release()
 
 # Tek-uçuş transkript: aynı (dosya, model, dil, iz) için çalışan iş varsa
 # yeni istek aynı job_id'yi alır; ikinci Whisper asla başlamaz.
@@ -705,9 +727,15 @@ def _prune_jobs_locked(now: float) -> None:
 def render_job(job_id: str) -> dict:
     with _jobs_lock:
         job = _jobs.get(job_id)
+        holder = _HEAVY_HOLDER
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
-    return {"job_id": job_id, **job}
+    out = {"job_id": job_id, **job}
+    # "queued" gizemli kalmasın: slotu kimin tuttuğunu söyle.
+    if (job.get("stage") == "queued" and holder is not None
+            and holder.get("job_id") != job_id):
+        out["blocked_by"] = holder
+    return out
 
 
 @app.get("/browse")
@@ -938,26 +966,26 @@ def _run_proxy_job(job_id: str, path: Path) -> None:
                 job.update(status="working", stage=stage, done=done, total=total)
 
     try:
-        with _HEAVY_SEM:
+        # Proxy slot dışında: thread-cap'li ffmpeg ile analizi bekletmez.
+        try:
+            streams = media.audio_streams(path, include_loudness=False)
+        except media.MediaError as exc:
+            raise media.MediaError(f"No audio: {exc}") from exc
+        tracks = list(range(len(streams)))
+        total = len(tracks) + 1
+        outdir = proxy_mod.proxy_dir(path.stem)
+        for i, track in enumerate(tracks):
+            _set("proxy-audio", i, total)
             try:
-                streams = media.audio_streams(path, include_loudness=False)
-            except media.MediaError as exc:
-                raise media.MediaError(f"No audio: {exc}") from exc
-            tracks = list(range(len(streams)))
-            total = len(tracks) + 1
-            outdir = proxy_mod.proxy_dir(path.stem)
-            for i, track in enumerate(tracks):
-                _set("proxy-audio", i, total)
-                try:
-                    proxy_mod.build_track_audio(path, track, outdir)
-                except media.MediaError:
-                    pass
-            _set("proxy-video", len(tracks), total)
-            try:
-                proxy_mod.build_video_proxy(path, outdir)
+                proxy_mod.build_track_audio(path, track, outdir)
             except media.MediaError:
                 pass
-            result = proxy_mod.status(path.stem, tracks)
+        _set("proxy-video", len(tracks), total)
+        try:
+            proxy_mod.build_video_proxy(path, outdir)
+        except media.MediaError:
+            pass
+        result = proxy_mod.status(path.stem, tracks)
     except media.MediaError as exc:
         with _jobs_lock:
             _jobs[job_id].update(status="error", error=str(exc))
@@ -1209,7 +1237,7 @@ def _run_transcribe_job(job_id: str, path: Path, req_data: dict) -> None:
     try:
         req = TranscribeRequest(**req_data)
         # Ağır iş sırası: başka bir render/transkript bitene kadar bekle.
-        with _HEAVY_SEM:
+        with _heavy_slot(job_id, "transcribe"):
             with _jobs_lock:
                 _jobs[job_id].update(stage="transcribe", done=0, total=None)
 

@@ -624,6 +624,11 @@ function updateTime() {
   if (el && S.video) {
     el.textContent = fmtTC(S.mode === "cut" ? cutTime(S.video.currentTime) : S.video.currentTime);
   }
+  const scrub = $("ppScrub");
+  if (scrub && S.video && S.duration > 0 && document.activeElement !== scrub) {
+    scrub.value = String(Math.round(
+      (S.video.currentTime / S.duration) * 1000));
+  }
   const btn = $("ppPlay");
   if (btn && S.video) btn.textContent = S.video.paused ? "▶" : "⏸";
 }
@@ -886,6 +891,12 @@ function boot() {
     updateTime();
   });
   $("ppPlay").addEventListener("click", toggle);
+  $("ppScrub").addEventListener("input", (e) => {
+    if (!S.video || !S.duration) return;
+    S.video.currentTime = Math.min(
+      Math.max((Number(e.target.value) / 1000) * S.duration, 0), S.duration);
+    syncAudios(true);
+  });
   $("ppFrameBack").addEventListener("click", () => stepFrame(-1));
   $("ppFrameFwd").addEventListener("click", () => stepFrame(1));
   $("ppSpeed").addEventListener("change", (e) => setSpeed(Number(e.target.value) || 1));
