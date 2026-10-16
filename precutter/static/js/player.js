@@ -409,9 +409,14 @@ function pps() {
   return PPS_LEVELS[S.zoomIdx];
 }
 
-function setupCanvas(cv, cssW, cssH) {
+// cssW, canvas'ın KENDİ ölçülen genişliği değil kapsayıcının genişliği olmalı.
+// fixedWidth=true: canvas sabit px'e çivilenir (şeritler kaydırmayı transform
+// ile yaptığı için gerekli). false: canvas %100'de bırakılır ki her çizimde
+// kapsayıcısına göre yeniden ölçülsün. Aksi halde kenarlık + border-box yüzünden
+// her çizimde 2px daralır ve şerit zamanla küçülüp kaybolur.
+function setupCanvas(cv, cssW, cssH, fixedWidth = true) {
   const dpr = window.devicePixelRatio || 1;
-  cv.style.width = `${Math.ceil(cssW)}px`;
+  cv.style.width = fixedWidth ? `${Math.ceil(cssW)}px` : "100%";
   cv.style.height = `${cssH}px`;
   cv.width = Math.max(1, Math.round(cssW * dpr));
   cv.height = Math.max(1, Math.round(cssH * dpr));
@@ -521,8 +526,10 @@ function ovCanvas() {
 function drawOverviewAll() {
   const ov = ovCanvas();
   if (!ov) return;
+  // Kapsayıcıdan ölçülür (canvas'ın kendi genişliğinden değil) ve canvas
+  // %100'de bırakılır: aksi halde her çizimde 2px daralıp yok olur.
   const cssW = Math.max(ov.clientWidth || ov.parentElement.clientWidth || 600, 50);
-  const ctx = setupCanvas(ov, cssW, OV_H);
+  const ctx = setupCanvas(ov, cssW, OV_H, false);
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, cssW, OV_H);
   const dur = span();
@@ -628,6 +635,23 @@ function wireOverviewAll() {
     }
   });
   window.addEventListener("mouseup", () => { drag = null; });
+  // Kapsayıcı genişliği pencere yeniden boyutlanmadan da değişebilir
+  // (dikey kaydırma çubuğu belirmesi, panel açılması, özet satırı vb.).
+  // O durumda da genel görünüm şeridi yeni genişliğe otursun. Yalnızca
+  // genişlik değişiminde çizeriz: yükseklik (scrollbar) değişimleri
+  // çizimi tetikleyip sonsuz döngü kurmasın.
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver((entries) => {
+      for (const en of entries) {
+        const w = Math.round(en.contentRect.width);
+        if (w === ov._lastW) continue;
+        ov._lastW = w;
+        redrawAll();
+      }
+    });
+    ro.observe(ov.parentElement || ov);
+    ov._ro = ro;
+  }
 }
 
 function centerOn(t, onlyLane) {

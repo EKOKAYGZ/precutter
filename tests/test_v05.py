@@ -197,6 +197,20 @@ def test_waveform_peaks_shape(monkeypatch, tmp_path):
     assert resp2.status_code == 200
 
 
+def test_overview_canvas_keeps_fluid_width():
+    """Genel görünüm şeridi her çizimde küçülmemeli.
+
+    ``drawOverviewAll`` canvas'a sabit px genişlik yazarsa (fixedWidth=true),
+    kenarlık + ``box-sizing: border-box`` yüzünden ``clientWidth`` her çizimde
+    2px azalır; oynatma sırasında (30fps) şerit gözle görülür biçimde daralıp
+    kaybolur. Bu yüzden genel görünüm canvas'ı %100 genişlikte kalmalı.
+    """
+    js = (Path(app_module.__file__).parent / "static" / "js" / "player.js").read_text(
+        encoding="utf-8")
+    assert 'cv.style.width = fixedWidth ?' in js
+    assert "setupCanvas(ov, cssW, OV_H, false)" in js
+
+
 def test_preview_mix_endpoint(monkeypatch, tmp_path):
     target = tmp_path / "v.mp4"
     target.write_bytes(b"0" * 16)
