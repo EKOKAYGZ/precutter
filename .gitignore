@@ -11,6 +11,7 @@ env/
 workspace/uploads/*
 workspace/outputs/*
 workspace/previews/*
+workspace/settings.json
 !workspace/uploads/.gitkeep
 !workspace/outputs/.gitkeep
 
