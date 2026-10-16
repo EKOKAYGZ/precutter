@@ -814,6 +814,13 @@ async function pollProxyJob(jobId) {
       const pct = Math.round((job.done / job.total) * 100);
       els.proxyNote.textContent = t("proxyPreparing").replace("{p}", pct);
     }
+    // Ses proxy'leri biten izi hemen tak: video kodlanırken ses gelir.
+    try {
+      if (uploadedName && window.PrecutterPlayer) {
+        const st = await fetch(`/proxy/${encodeURIComponent(uploadedName)}`);
+        if (st.ok) window.PrecutterPlayer.noteProxyProgress(await st.json());
+      }
+    } catch (e) { /* next tick */ }
     if (job.status === "done") {
       if (window.PrecutterPlayer) {
         window.PrecutterPlayer.setProxies(proxyUrls(job.result || {}));

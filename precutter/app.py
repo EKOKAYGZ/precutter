@@ -971,6 +971,10 @@ def _run_proxy_job(job_id: str, path: Path) -> None:
             streams = media.audio_streams(path, include_loudness=False)
         except media.MediaError as exc:
             raise media.MediaError(f"No audio: {exc}") from exc
+        try:
+            proxy_duration = media.get_duration(path)
+        except media.MediaError:
+            proxy_duration = None
         tracks = list(range(len(streams)))
         total = len(tracks) + 1
         outdir = proxy_mod.proxy_dir(path.stem)
@@ -980,9 +984,15 @@ def _run_proxy_job(job_id: str, path: Path) -> None:
                 proxy_mod.build_track_audio(path, track, outdir)
             except media.MediaError:
                 pass
+
+        def _video_progress(frac: float) -> None:
+            _set("proxy-video", len(tracks) + frac, total)
+
         _set("proxy-video", len(tracks), total)
         try:
-            proxy_mod.build_video_proxy(path, outdir)
+            proxy_mod.build_video_proxy(path, outdir,
+                                        duration=proxy_duration,
+                                        progress=_video_progress)
         except media.MediaError:
             pass
         result = proxy_mod.status(path.stem, tracks)

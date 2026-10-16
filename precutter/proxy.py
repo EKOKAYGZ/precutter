@@ -69,12 +69,20 @@ def build_track_audio(src: Path, track: int, outdir: Path) -> str:
 
 
 def build_video_proxy(src: Path, outdir: Path,
-                      height: int = 720) -> Optional[str]:
-    """720p H.264 proxy (no audio). Returns filename or None when skipped."""
+                      height: int = 720,
+                      duration: Optional[float] = None,
+                      progress=None) -> Optional[str]:
+    """720p H.264 proxy (no audio). Returns filename or None when skipped.
+
+    progress, verilirse progress(frac) ile 0..1 arası çağrılır (ffmpeg
+    -progress çıktısından). Uzun kodlamada yüzde donmuş görünmez.
+    """
     key = f"{outdir.name}:video"
     with _lock_for(key):
         final = outdir / "proxy.mp4"
         if final.exists() and final.stat().st_size > 1024:
+            if progress is not None:
+                progress(1.0)
             return final.name
         tmp = outdir / "proxy.mp4.part"
         cmd = [config.FFMPEG_BIN, "-hide_banner", "-nostats", "-v", "error",
@@ -82,13 +90,40 @@ def build_video_proxy(src: Path, outdir: Path,
                "-vf", f"scale=-2:{height}", "-c:v", "libx264",
                "-preset", "veryfast", "-crf", "28", "-an",
                "-threads", "4",
-               "-movflags", "+faststart", "-f", "mp4", str(tmp)]
+               "-movflags", "+faststart",
+               "-progress", "pipe:1", "-f", "mp4", str(tmp)]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, encoding="utf-8", errors="replace")
         except (FileNotFoundError, OSError) as exc:
             raise media.MediaError(f"ffmpeg not found: {exc}") from exc
-        if proc.returncode == 0 and tmp.exists() and tmp.stat().st_size > 1024:
+        total_ms = (duration * 1000.0) if duration else 0.0
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line = line.strip()
+                if line.startswith("out_time_ms=") and total_ms > 0:
+                    try:
+                        ms = float(line.split("=", 1)[1])
+                    except ValueError:
+                        continue
+                    if progress is not None:
+                        progress(max(0.0, min(1.0, ms / total_ms)))
+                elif line.startswith("progress=") and line.strip() == "progress=end":
+                    break
+            proc.wait()
+            rc = proc.returncode
+        except (OSError, ValueError, AssertionError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            rc = 1
+        if rc == 0 and tmp.exists() and tmp.stat().st_size > 1024:
             _atomic_replace(tmp, final)
+            if progress is not None:
+                progress(1.0)
             return final.name
         try:
             tmp.unlink(missing_ok=True)

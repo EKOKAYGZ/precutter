@@ -109,3 +109,16 @@ def test_proxy_single_flight(monkeypatch, two_track):
     second = client.post("/proxy", json={"filename": "two.mp4"}).json()
     assert second["job_id"] == first["job_id"]
     assert second.get("deduped") is True
+
+
+@needs_ffmpeg
+def test_video_proxy_reports_progress(two_track):
+    from precutter import proxy as proxy_mod
+
+    outdir = proxy_mod.proxy_dir("two_prog")
+    seen = []
+    name = proxy_mod.build_video_proxy(
+        two_track, outdir, duration=6.0, progress=seen.append)
+    assert name == "proxy.mp4"
+    assert seen and seen[-1] == 1.0
+    assert all(0.0 <= v <= 1.0 for v in seen)

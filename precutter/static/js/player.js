@@ -823,6 +823,31 @@ function proxyFailed() {
   if (S.pendingPlay) tryStartPending();
 }
 
+/* Proxy işi sürerken biten parçayı hemen tak (ses için video bitimini bekleme). */
+function noteProxyProgress(status) {
+  if (!status || !S.filename) return;
+  let changed = false;
+  for (const [track, file] of Object.entries(status.audio || {})) {
+    if (file && !S.proxyAudio[track]) {
+      S.proxyAudio[track] = `/proxy-audio/${encodeURIComponent(S.filename)}?track=${track}`;
+      changed = true;
+    }
+  }
+  if (changed) {
+    if (S.proxyState === "idle") S.proxyState = "working";
+    for (const lane of S.lanes) {
+      if (!lane.audio) attachAudio(lane);
+    }
+    if (S.pendingPlay) tryStartPending();
+  }
+  if (status.video && !S.proxyVideo) {
+    setProxies({
+      audio: S.proxyAudio,
+      video: `/proxy-video/${encodeURIComponent(S.filename)}`,
+    });
+  }
+}
+
 function resetPlayer() {
   if (S.rafId != null) {
     cancelAnimationFrame(S.rafId);
@@ -960,6 +985,7 @@ function boot() {
     setRenderedUrl,
     setProxies,
     proxyFailed,
+    noteProxyProgress,
     reset: resetPlayer,
   };
   updateTime();
