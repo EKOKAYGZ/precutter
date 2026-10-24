@@ -775,12 +775,16 @@ function proxyUrls(status) {
 
 async function startProxyFlow() {
   if (!uploadedName) return;
+  // Which file is this flow for? If the user switches files meanwhile, the
+  // old file's proxies must never be attached to the new file's player.
+  const name = uploadedName;
   els.proxyNote.hidden = false;
   els.proxyNote.textContent = t("proxyPreparing").replace("{p}", "0");
   try {
-    const st = await fetch(`/proxy/${encodeURIComponent(uploadedName)}`);
+    const st = await fetch(`/proxy/${encodeURIComponent(name)}`);
     if (st.ok) {
       const status = await st.json();
+      if (uploadedName !== name) return;
       if (status.ready && window.PrecutterPlayer) {
         window.PrecutterPlayer.setProxies(proxyUrls(status));
         els.proxyNote.textContent = t("proxyReady");
@@ -793,20 +797,24 @@ async function startProxyFlow() {
     const response = await fetch("/proxy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename: uploadedName }),
+      body: JSON.stringify({ filename: name }),
     });
     if (!response.ok) throw new Error(await readError(response));
     const { job_id } = await response.json();
-    await pollProxyJob(job_id);
+    if (uploadedName !== name) return;
+    await pollProxyJob(job_id, name);
   } catch (err) {
+    if (uploadedName !== name) return;
     els.proxyNote.hidden = true;
     if (window.PrecutterPlayer) window.PrecutterPlayer.proxyFailed();
   }
 }
 
-async function pollProxyJob(jobId) {
+async function pollProxyJob(jobId, name) {
   for (;;) {
     await new Promise((r) => setTimeout(r, 2000));
+    // File changed or removed: this poll belongs to another file, stop.
+    if (name && uploadedName !== name) return;
     let job;
     try {
       const response = await fetch(`/jobs/${jobId}`);
@@ -823,11 +831,12 @@ async function pollProxyJob(jobId) {
     }
     // Ses proxy'leri biten izi hemen tak: video kodlanırken ses gelir.
     try {
-      if (uploadedName && window.PrecutterPlayer) {
+      if (uploadedName && (!name || uploadedName === name) && window.PrecutterPlayer) {
         const st = await fetch(`/proxy/${encodeURIComponent(uploadedName)}`);
         if (st.ok) window.PrecutterPlayer.noteProxyProgress(await st.json());
       }
     } catch (e) { /* next tick */ }
+    if (name && uploadedName !== name) return;
     if (job.status === "done") {
       if (window.PrecutterPlayer) {
         window.PrecutterPlayer.setProxies(proxyUrls(job.result || {}));

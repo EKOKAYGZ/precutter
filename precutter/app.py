@@ -1,4 +1,5 @@
 """FastAPI application for PreCutter."""
+import asyncio
 import logging
 import os
 import shutil
@@ -38,12 +39,37 @@ class _QuietProbeFilter(logging.Filter):
         return not any(path in message for path in self.BLOCKED)
 
 
+def _quiet_connection_reset_handler(previous=None):
+    """Event-loop exception handler that drops client-disconnect noise.
+
+    On Windows the Proactor loop logs a full traceback
+    (``ConnectionResetError: [WinError 10054]``) every time the browser
+    aborts a Range request, which <audio>/<video> do constantly while
+    seeking. It is harmless; everything else goes to the previous handler.
+    """
+
+    def handler(loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError)):
+            return
+        if previous is not None:
+            previous(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    return handler
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # uvicorn configures its own logging at startup (dictConfig), which can
     # drop filters attached earlier in main(). Installing here runs after
     # logging setup, so the filter reliably sticks.
     logging.getLogger("uvicorn.access").addFilter(_QuietProbeFilter())
+    if os.name == "nt":
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(
+            _quiet_connection_reset_handler(loop.get_exception_handler()))
     yield
 
 
@@ -1030,6 +1056,28 @@ def _run_proxy_job(job_id: str, path: Path) -> None:
         _jobs[job_id].update(status="done", done=1, total=1, result=result)
 
 
+# (path, mtime_ns, size) -> audio stream count. The player polls
+# /proxy/{name} every 2 s while proxies build; without this every poll
+# spawned ffprobe on a multi-GB source.
+_stream_count_cache: Dict[tuple, int] = {}
+_stream_count_lock = threading.Lock()
+
+
+def _audio_stream_count(path: Path) -> int:
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    with _stream_count_lock:
+        cached = _stream_count_cache.get(key)
+    if cached is not None:
+        return cached
+    n = len(media.audio_streams(path, include_loudness=False))
+    with _stream_count_lock:
+        if len(_stream_count_cache) > 256:
+            _stream_count_cache.clear()
+        _stream_count_cache[key] = n
+    return n
+
+
 @app.get("/proxy/{name}")
 def proxy_status(name: str) -> dict:
     """Proxy files available right now (no building). 404 = never started."""
@@ -1039,7 +1087,7 @@ def proxy_status(name: str) -> dict:
         running = (job_id is not None
                    and _jobs.get(job_id, {}).get("status") == "working")
     try:
-        n = len(media.audio_streams(path, include_loudness=False))
+        n = _audio_stream_count(path)
     except media.MediaError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     from . import proxy as proxy_mod
@@ -1162,7 +1210,33 @@ def delete_upload(name: str) -> dict:
             cached.unlink(missing_ok=True)
         except OSError:
             pass
+    # Proxy folder (previews/<stem>/: per-track audio + 720p video) used to
+    # be left behind forever after the upload was deleted.
+    freed += _remove_tree(previews / path.stem)
     return {"deleted": path.name, "freed_bytes": freed}
+
+
+def _remove_tree(directory: Path) -> int:
+    """Best-effort delete of a folder; returns bytes freed. Locked files
+    (e.g. a proxy being written right now) are skipped, not fatal."""
+    if not directory.is_dir():
+        return 0
+    freed = 0
+    for item in sorted(directory.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        try:
+            if item.is_file():
+                size = item.stat().st_size
+                item.unlink()
+                freed += size
+            elif item.is_dir():
+                item.rmdir()
+        except OSError:
+            pass
+    try:
+        directory.rmdir()
+    except OSError:
+        pass
+    return freed
 
 
 @app.post("/storage/clear")
@@ -1183,6 +1257,10 @@ def clear_storage(payload: dict | None = None) -> dict:
                     path.unlink()
                 except OSError:
                     pass
+            elif path.is_dir() and directory.name == "previews":
+                # Proxy folders (previews/<stem>/) were skipped before, so
+                # "clear cache" never freed the biggest preview files.
+                freed += _remove_tree(path)
     try:
         from . import transcribe as transcribe_mod
 
