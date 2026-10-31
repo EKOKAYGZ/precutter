@@ -1,0 +1,26 @@
+PreCutter
+Copyright 2026 Ekoo (EKOKAYGZ)
+
+This product is licensed under the MIT License (see LICENSE).
+
+Third-party software
+--------------------
+PreCutter depends on the following projects, installed separately via pip
+(requirements.txt) and not bundled in this repository:
+
+- FastAPI (MIT)
+- Uvicorn (BSD-3-Clause)
+- python-multipart (Apache-2.0)
+- NumPy (BSD-3-Clause)
+- faster-whisper (MIT)
+- PyAV (BSD-3-Clause)
+- PyTorch / torchaudio (BSD-3-Clause)
+- httpx (BSD-3-Clause), pytest (MIT) for tests
+
+FFmpeg / ffprobe are required at runtime and must be installed by the user.
+They are invoked as external programs and are not distributed with PreCutter.
+FFmpeg is licensed under the LGPL/GPL depending on how it was built.
+
+Speech recognition models (Whisper via faster-whisper) and optional local
+vision/language models are downloaded by the user and remain under their own
+licenses.

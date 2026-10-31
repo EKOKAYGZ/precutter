@@ -359,3 +359,8 @@ tests/
   (`h264_nvenc`) automatically, otherwise libx264; the active encoder is
   reported by `/health`.
 - Output video: H.264 (`libx264`, `veryfast`, CRF 20) with AAC 192k audio.
+
+## License
+
+PreCutter is released under the [MIT License](LICENSE).
+Copyright 2026 Ekoo (EKOKAYGZ). Third-party notices are in [NOTICE](NOTICE).
